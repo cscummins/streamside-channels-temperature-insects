@@ -1,0 +1,138 @@
+---
+title: "Survivorship analysis - SSC 2019"
+author: "Carolyn Cummins"
+date: "5/21/2020"
+output: html_document
+---
+
+Survival analysis for streamside channels experiment 2019 -- based on code for Reagan Mahaley's CURO project
+```{r}
+library(survival)
+library(ggfortify)
+library(ranger)
+library(viridis)
+library(survminer)
+setwd("~/Documents/Dissertation etc./Streamside channels 2019/Data/Survival_analyses")
+surv.data<-read.csv("Survivorship_data_20May2020.csv")
+surv.data<-surv.data[-c(8:15)]
+```
+
+```{r}
+surv.data$trt_ID<-paste(surv.data$channel,surv.data$leaf.sp,sep="-")
+initial_counts<-surv.data[1:40,]
+surv.data2<-surv.data[41:nrow(surv.data),]
+day_sampled<-as.numeric(levels(as.factor(as.character(surv.data$days.since.start))))
+IDS<-levels(as.factor(surv.data$trt_ID))
+```
+
+A loop!
+```{r}
+long_surv_data<-data.frame()
+
+for (i in 1:nrow(surv.data2)){
+
+  
+  surv.data1<-surv.data2[i,]
+  previous_sample<-surv.data[i,]
+  
+  initial<-initial_counts[initial_counts$trt_ID==surv.data1$trt_ID,]
+  
+  survivors<-surv.data1$X.surviving
+  dead<-initial$X.surviving-surv.data1$X.surviving
+  
+  surv.data3<-data.frame(Temp=surv.data1$temp.trt,Leaf.sp=surv.data1$leaf.sp,date=surv.data1$date,end_day=surv.data1$days.since.start,start_day=previous_sample$days.since.start,ID=surv.data1$trt_ID
+                 ,status=c(rep(0,survivors),rep(1,dead)))
+  
+  long_surv_data<-rbind(long_surv_data,surv.data3)
+}
+```
+
+Make a survivorship object
+```{r}
+survival_object<-Surv(time=long_surv_data$start_day,time2=long_surv_data$end_day,event=long_surv_data$status,type="interval")
+```
+
+Model 1: fits all the data to one model and shows the probability of surviving as the experiment goes on. 
+```{r}
+model1<-survfit(survival_object~1,data=long_surv_data)
+autoplot(model1)
+```
+
+Model 2: Let's look by food type
+```{r}
+model2<-survfit(survival_object~Leaf.sp,data=long_surv_data)
+
+survleaf<-ggplot(model2,aes(x=time,y=surv,color=strata, fill=strata))+geom_line()+theme_classic()+
+  geom_ribbon(aes(ymin=model2$lower, ymax=model2$upper), show.legend=FALSE, linetype=0, alpha=0.25)+ xlab("Time (days)")+ylab("Survival probability") + scale_color_manual(values=c("#440154FF", "#E85362FF"), name="Leaf type", breaks=c("Acer", "Rhodo"), labels=c("Acer", "Rhodo"))+scale_fill_manual(values=c("#440154FF", "#E85362FF"), guide=FALSE)+theme(legend.title=element_blank())+geom_point()
+survleaf
+
+```
+
+Model 3: Let's look by temperature
+```{r}
+model3<-survfit(survival_object~Temp,data=long_surv_data)
+
+black.bold.text<-element_text(face = "bold", color = "black", size=14)
+black.bold.text.labs<-element_text(face="bold", color="black", size=12)
+black.bold.text.leg<-element_text(face="bold", color="black", size=10)
+
+survtemp<-ggplot(model3,aes(x=time,y=surv,color=strata, fill=strata))+geom_line()+theme_classic()+
+  geom_ribbon(aes(ymin=model3$lower, ymax=model3$upper), show.legend=FALSE, linetype=0, alpha=0.25) + xlab("Time (days)") + ylab("Survival probability")+scale_color_manual(values=c("#08051EFF", "#5C126EFF", "#C43C4EFF", "#F8870EFF", "#F7D340FF"), breaks=c("0", "1", "2", "3", "4"), labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))+scale_fill_manual(values=c("#08051EFF", "#5C126EFF", "#C43C4EFF", "#F8870EFF", "#F7D340FF"), guide=FALSE)+theme(legend.title=element_blank())+geom_point()+theme(axis.title=black.bold.text)+theme(axis.text=black.bold.text.labs)+theme(axis.title.x = element_text(vjust=-0.5))+theme(axis.title.y = element_text(vjust=1.5))+theme(legend.text = black.bold.text.leg)+theme(axis.text=element_text(size=14))+theme(axis.title=element_text(size=18))+theme(legend.text=element_text(size=14))
+survtemp
+
+#This plot was made using ggsurvplot but it doesn't show the data nearly as clearly
+#surv.plot<-ggsurvplot(model3, palette=c("#44039EFF", "#9512A1FF", "#C5407EFF", "#EF7F4FFF", "#F7E225FF"), conf.int=TRUE, linetype=1)
+#surv.plot
+```
+
+Switching to a different function so we can put both leaf species and temp into the model
+```{r}
+## We need to add a little bit to each day - because the function can't handle 0 values of day
+survival_object2<-Surv(time=long_surv_data$start_day+0.01,time2=long_surv_data$end_day+0.01,event=long_surv_data$status,type="interval")
+
+model4<-survreg(survival_object2~Temp*Leaf.sp,data=long_surv_data,dist="exponential")
+round(anova(model4),2)
+```
+
+This code accounts for the repeated measurements within a treatment and tests for statistical significance:
+```{r}
+model5<-survreg(survival_object2~Temp*Leaf.sp+frailty.gaussian(long_surv_data$ID),data=long_surv_data,dist="exponential")
+round(anova(model5),4)
+summary(model5)
+```
+
+#####################
+Other analyses?
+Let's try the "log-rank" test instead (info here: http://www.sthda.com/english/wiki/survival-analysis-basics, here: 
+https://www.theanalysisfactor.com/the-six-types-of-survival-analysis-and-challenges-in-learning-them/, and here: http://www.mas.ncl.ac.uk/~njnsm/medfac/docs/surv.pdf)
+Log-rank is basically an ANOVA for survivorship curves -- it tests whether survival probabilities are different among groups
+```{r}
+#by temp
+surv_diff <- survdiff(Surv(end_day, status) ~ Temp, data = long_surv_data)
+surv_diff2 <- survdiff(Surv(end_day, status) ~ Temp + frailty.gaussian(long_surv_data$ID), data = long_surv_data)
+surv_diff
+surv_diff2
+#by leaf type
+surv_diff <- survdiff(Surv(end_day, status) ~ Leaf.sp, data = long_surv_data)
+surv_diff
+```
+But what about interactions? Maybe we can use the Cox proportional hazards model to look at this. I still don't fully understand this but we can try it?
+Problem: doesn't support data that is not right-censored.....
+some info here: https://www.emilyzabor.com/tutorials/survival_analysis_in_r_tutorial.html
+```{r}
+cox.mod <- coxph(Surv(end_day, status) ~ Temp*Leaf.sp, data =  long_surv_data)
+summary(cox.mod)
+#This seems to give me what I need but I don't get how to interpret it...
+#ALSO you can't do these analyses for interval-censored data. Abandon ship.
+```
+
+Export graphs:
+```{r}
+jpeg(filename="survleaf", width=8, height=6, units="in", pointsize=12, bg="white", res=600)
+survleaf
+dev.off()
+
+jpeg(filename="survtemp", width=8, height=6, units="in", pointsize=12, bg="white", res=600)
+survtemp
+dev.off()
+```

@@ -1,0 +1,398 @@
+---
+title: "SSC2019_TEMP_28Aug2023"
+author: "Carolyn Cummins"
+date: "2023-08-29"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+
+```
+
+
+```{r}
+
+raw_0A <- read.csv("Channel_0A_SSC2019.csv", header=T)
+raw_0B <- read.csv("Channel_0B_SSC2019.csv", header=T)
+raw_0C <- read.csv("Channel_0C_SSC2019.csv", header=T)
+raw_0D <- read.csv("Channel_0D_SSC2019.csv", header=T)
+
+raw_1A <- read.csv("Channel_1A_SSC2019.csv", header=T)
+raw_1B <- read.csv("Channel_1B_SSC2019.csv", header=T)
+raw_1C <- read.csv("Channel_1C_SSC2019.csv", header=T)
+raw_1D <- read.csv("Channel_1D_SSC2019.csv", header=T)
+
+raw_2A <- read.csv("Channel_2A_SSC2019.csv", header=T)
+raw_2B <- read.csv("Channel_2B_SSC2019.csv", header=T)
+raw_2C <- read.csv("Channel_2C_SSC2019.csv", header=T)
+raw_2D <- read.csv("Channel_2D_SSC2019.csv", header=T)
+
+raw_3A <- read.csv("Channel_3A_SSC2019.csv", header=T)
+raw_3B <- read.csv("Channel_3B_SSC2019.csv", header=T)
+raw_3C <- read.csv("Channel_3C_SSC2019.csv", header=T)
+raw_3D <- read.csv("Channel_3D_SSC2019.csv", header=T)
+
+raw_4A <- read.csv("Channel_4A_SSC2019.csv", header=T)
+raw_4B <- read.csv("Channel_4B_SSC2019.csv", header=T)
+raw_4C <- read.csv("Channel_4C_SSC2019.csv", header=T)
+raw_4D <- read.csv("Channel_4D_SSC2019.csv", header=T)
+
+```
+
+
+```{r}
+
+raw_0A$channel <- "0A"
+raw_0B$channel <- "0B"
+raw_0C$channel <- "0C"
+raw_0D$channel <- "0D"
+
+raw_1A$channel <- "1A"
+raw_1B$channel <- "1B"
+raw_1C$channel <- "1C"
+raw_1D$channel <- "1D"
+
+raw_2A$channel <- "2A"
+raw_2B$channel <- "2B"
+raw_2C$channel <- "2C"
+raw_2D$channel <- "2D"
+
+raw_3A$channel <- "3A"
+raw_3B$channel <- "3B"
+raw_3C$channel <- "3C"
+raw_3D$channel <- "3D"
+
+raw_4A$channel <- "4A"
+raw_4B$channel <- "4B"
+raw_4C$channel <- "4C"
+raw_4D$channel <- "4D"
+
+raw_0A <- separate(data = raw_0A, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_0B <- separate(data = raw_0B, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_0C <- separate(data = raw_0C, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_0D <- separate(data = raw_0D, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+
+raw_1A <- separate(data = raw_1A, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_1B <- separate(data = raw_1B, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_1C <- separate(data = raw_1C, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_1D <- separate(data = raw_1D, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+
+raw_2A <- separate(data = raw_2A, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_2B <- separate(data = raw_2B, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_2C <- separate(data = raw_2C, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_2D <- separate(data = raw_2D, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+
+raw_3A <- separate(data = raw_3A, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_3B <- separate(data = raw_3B, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_3C <- separate(data = raw_3C, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_3D <- separate(data = raw_3D, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+
+raw_4A <- separate(data = raw_4A, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_4B <- separate(data = raw_4B, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_4C <- separate(data = raw_4C, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+raw_4D <- separate(data = raw_4D, col = date_time, into  = c('date', 'time'), sep = ' ', remove=FALSE)
+
+```
+
+
+
+```{r}
+
+raw_0A <- raw_0A %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_0B <- raw_0B %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_0C <- raw_0C %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_0D <- raw_0D %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+
+raw_1A <- raw_1A %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_1B <- raw_1B %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_1C <- raw_1C %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_1D <- raw_1D %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+
+raw_2A <- raw_2A %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_2B <- raw_2B %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_2C <- raw_2C %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_2D <- raw_2D %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+
+raw_3A <- raw_3A %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_3B <- raw_3B %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_3C <- raw_3C %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_3D <- raw_3D %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+
+raw_4A <- raw_4A %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_4B <- raw_4B %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_4C <- raw_4C %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+raw_4D <- raw_4D %>% mutate(date=mdy(date), time=hm(time), date_time=mdy_hm(date_time))
+
+```
+
+
+```{r}
+
+all_flume_temp <- bind_rows(raw_0A,raw_0B,raw_0C,raw_0D,raw_1A,raw_1B,raw_1C,raw_1D,
+          raw_2A,raw_2B,raw_2C,raw_2D,raw_3A,raw_3B,raw_3C,raw_3D,raw_4A,raw_4B,raw_4C,raw_4D)
+
+all_flume_temp_expt_data <- all_flume_temp %>% filter(between(date, as.Date('2019-03-12'), as.Date('2019-04-17')))
+
+all_flume_temp_expt_data_1 <- all_flume_temp_expt_data %>% mutate(
+  week = case_when(
+    date>='2019-03-12' & date<='2019-03-20' ~ '1',
+    date>='2019-03-20' & date<='2019-03-27' ~ '2',
+    date>='2019-03-27' & date<='2019-04-03' ~ '3',
+    date>='2019-04-03' & date<='2019-04-10' ~ '4',
+    date>='2019-04-10' & date<='2019-04-17' ~ '5',
+      )
+)
+
+all_flume_temp_expt_data_averages_1 <- all_flume_temp_expt_data_1 %>% group_by(channel, week) %>%
+  summarise(mean_temp_C=mean(temp_C, na.rm=T), sd=sd(temp_C, na.rm=T)) #n=n(), se=(sd/sqrt(n)))
+
+#write.csv(all_flume_temp_expt_data_averages_1, "all_flume_temp_expt_averages_1.csv")
+
+
+
+all_flume_temp_expt_data_2 <- all_flume_temp_expt_data %>% mutate(
+  week = case_when(
+    date>='2019-03-12' & date<='2019-03-21' ~ '1b',
+    date>='2019-03-20' & date<='2019-03-27' ~ '2',
+    date>='2019-03-28' & date<='2019-04-04' ~ '3b',
+    date>='2019-04-03' & date<='2019-04-10' ~ '4',
+    date>='2019-04-10' & date<='2019-04-17' ~ '5',
+      )
+)
+
+all_flume_temp_expt_data_averages_2 <- all_flume_temp_expt_data_2 %>% group_by(channel, week) %>%
+  summarise(mean_temp_C=mean(temp_C, na.rm=T), sd=sd(temp_C, na.rm=T))#, n=n(), se=(sd/sqrt(n)))
+
+#write.csv(all_flume_temp_expt_data_averages_2, "all_flume_temp_expt_averages_2.csv")
+
+
+
+all_flume_temp_expt_data_3 <- all_flume_temp_expt_data %>% mutate(
+  week = case_when(
+    date>='2019-03-13' & date<='2019-03-21' ~ '1c',
+    date>='2019-03-20' & date<='2019-03-27' ~ '2',
+    date>='2019-03-28' & date<='2019-04-03' ~ '3c',
+    date>='2019-04-03' & date<='2019-04-10' ~ '4',
+    date>='2019-04-10' & date<='2019-04-17' ~ '5',
+      )
+)
+
+all_flume_temp_expt_data_averages_3 <- all_flume_temp_expt_data_3 %>% group_by(channel, week) %>%
+  summarise(mean_temp_C=mean(temp_C, na.rm=T), sd=sd(temp_C, na.rm=T))#, n=n(), se=(sd/sqrt(n)))
+
+all_flume_temp_expt_data_averages_3 <- all_flume_temp_expt_data_averages_3 %>% filter(!is.na(week))
+
+
+#write.csv(all_flume_temp_expt_data_averages_3, "all_flume_temp_expt_averages_3.csv")
+
+
+```
+
+
+Getting averages for ms discussion
+```{r}
+
+all_flume_temp_day1 <- all_flume_temp %>% filter(date=="2019-03-13")
+all_flume_temp_day1_0 <- all_flume_temp_day1 %>% filter(channel=="0A" | channel=="0B" | channel == "0C" | channel=="0D")
+all_flume_temp_day1_4 <- all_flume_temp_day1 %>% filter(channel=="4A" | channel=="4B" | channel == "4C" | channel=="4D")
+
+mean_temp_0_day1 <- mean(all_flume_temp_day1_0$temp_C)
+#10.44 C
+mean_temp_4_day1 <- mean(all_flume_temp_day1_4$temp_C)
+#14.22C
+
+max_temp_all_data <- max(all_flume_temp_expt_data$temp_C)
+#19.28
+#Channel 4D, April 10th, 2019
+
+all_flume_temp_weeks3_5 <- all_flume_temp %>% filter(date>"2019-04-03" & date<"2019-04-18")
+all_flume_temp_weeks3_5_0 <- all_flume_temp_weeks3_5 %>% filter(channel=="0A" | channel=="0B" | channel == "0C" | channel=="0D")
+all_flume_temp_weeks3_5_4 <- all_flume_temp_weeks3_5 %>% filter(channel=="4A" | channel=="4B" | channel == "4C" | channel=="4D")
+all_flume_temp_weeks3_5_3 <- all_flume_temp_weeks3_5 %>% filter(channel=="3A" | channel=="3B" | channel == "3C" | channel=="3D")
+
+mean_temp_3_5_0 <- mean(all_flume_temp_weeks3_5_0$temp_C)
+#12.69
+mean_temp_3_5_4 <- mean(all_flume_temp_weeks3_5_4$temp_C)
+#16.57
+mean_temp_3_5_3 <- mean(all_flume_temp_weeks3_5_3$temp_C)
+
+all_flume_temp_week5 <- all_flume_temp %>% filter(date>"2019-04-09" & date<"2019-04-18")
+all_flume_temp_week5_4 <- all_flume_temp_week5 %>% filter(channel=="4A" | channel=="4B" | channel == "4C" | channel=="4D")
+mean(all_flume_temp_week5_4$temp_C)
+
+all_flume_temp_week1 <- all_flume_temp %>% filter(date>"2019-03-12" & date<"2019-03-22")
+all_flume_temp_week1_4 <- all_flume_temp_week1 %>% filter(channel=="4A" | channel=="4B" | channel == "4C" | channel=="4D")
+mean(all_flume_temp_week1_4$temp_C)
+
+all_flume_temp_week1_4_summ <- all_flume_temp_week1_4 %>% group_by(channel) %>% summarise(mean_channel_temp=mean(temp_C))
+mean(all_flume_temp_week1_4_summ$mean_channel_temp)
+
+all_flume_temp_week5_4_summ <- all_flume_temp_week5_4 %>% group_by(channel) %>% summarise(mean_channel_temp=mean(temp_C))
+mean(all_flume_temp_week5_4_summ$mean_channel_temp)
+
+```
+
+mean, median, range, and sd of temp overall in each treatment
+```{r}
+
+library(stringr)
+all_flume_temp_expt_data$treatment<- substr(all_flume_temp_expt_data$channel, start=1, stop=1)
+all_flume_temp_expt_data$treatment <- as.factor(all_flume_temp_expt_data$treatment)
+
+all_flume_temp_expt_treatment_summary <- all_flume_temp_expt_data %>% group_by(treatment) %>%
+  summarise(mean_temp_C=mean(temp_C, na.rm=T), sd=sd(temp_C, na.rm=T), median_temp_C=median(temp_C, na.rm=T),min_temp_C=min(temp_C, na.rm=T), max_temp_C=max(temp_C, na.rm=T))
+
+
+```
+
+Data visualization
+
+Create df that has mean channel-level data at each 30-min increment
+```{r}
+
+all_flume_temp_treatment <- all_flume_temp_expt_data %>% group_by(date_time, treatment) %>% 
+  summarise(mean_temp_C=mean(temp_C))
+
+all_flume_temp_treatment_date <- all_flume_temp_expt_data %>% group_by(date, treatment) %>% 
+  summarise(mean_temp_C=mean(temp_C))
+
+
+```
+
+
+```{r}
+
+temps_time_series_datetime <- ggplot(all_flume_temp_treatment, aes(x=date_time, y=mean_temp_C, color=treatment))+
+  theme_classic()+
+  geom_line()+
+  scale_color_manual(values=c("#3E92CC", "#5C126EFF", "#F7D340FF", "#F8870EFF", "#C43C4EFF"),
+                     breaks=c("0", "1", "2", "3", "4"),
+                     labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))+
+  theme(legend.title = element_blank())+
+  xlab("Date")+
+  ylab("Mean temperature (°C)")+
+  scale_x_datetime(date_breaks = "3 days")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+  scale_y_continuous(limits=c(0,20), breaks=c(0,2,4,6,8,10,12,14,16,18,20))+
+  theme(legend.text=element_text(size=12, face="bold"))+
+  theme(axis.title=element_text(size=16, face="bold"))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.title.x = element_blank())
+
+temps_time_series_datetime
+
+```
+
+
+
+```{r}
+
+temps_time_series_date <- ggplot(all_flume_temp_treatment_date, aes(x=date, y=mean_temp_C, color=treatment))+
+  theme_classic()+
+  geom_point()+
+  geom_line()+
+  scale_color_manual(values=c("#3E92CC", "#5C126EFF", "#F7D340FF", "#F8870EFF", "#C43C4EFF"),
+                     breaks=c("0", "1", "2", "3", "4"),
+                     labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))+
+  theme(legend.title = element_blank())+
+  xlab("Date")+
+  ylab("Mean temperature (°C)")+
+  scale_x_date(date_breaks = "3 days")+
+  theme(axis.title.x=element_blank())+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+  scale_y_continuous(limits=c(0,20), breaks=c(0,2,4,6,8,10,12,14,16,18,20))+
+  theme(legend.text=element_text(size=12, face="bold"))+
+  theme(axis.title=element_text(size=16, face="bold"))+
+  theme(axis.text=element_text(size=12, face="bold"))
+
+temps_time_series_date
+
+```
+
+
+Plot temp in Carpenter Bracnch (WS13)
+```{r}
+
+temp_SI <- read.csv("landscape_dailytemp_masterlong_SIyr1.1Feb24.csv")
+temp_SI_WS13 <- temp_SI %>% filter(stream=="WS13")
+temp_SI_WS13 <- temp_SI_WS13 %>% mutate(date=ymd(date))
+temp_SI_WS13_sep22 <- temp_SI_WS13 %>% filter(date>"2017-09-21")
+max_temp_WS13 <- max(temp_SI_WS13_sep22$temp.celsius)
+#18.13
+min_temp_WS13 <- min(temp_SI_WS13$temp.celsius)
+#0.68
+mean(temp_SI_WS13_sep22$temp.celsius)
+median(temp_SI_WS13_sep22$temp.celsius)
+sd(temp_SI_WS13_sep22$temp.celsius)
+
+start_date_17 <- as.Date("2018-03-12")
+end_date_17 <- as.Date("2018-04-17")
+
+
+WS13_temp_plot <- ggplot(temp_SI_WS13_sep22, aes(x=date, y=temp.celsius))+
+  theme_classic()+
+  geom_line(color="black")+
+  geom_point()+
+  xlab("Date")+
+  ylab("Mean daily temperature (°C)")+
+  scale_x_date(date_breaks = "1 month")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+  scale_y_continuous(limits=c(0,20), breaks=c(0,2,4,6,8,10,12,14,16,18,20))+
+  theme(legend.text=element_text(size=10))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.title.x = element_blank())+
+  theme(axis.title.y=element_blank()) + 
+  geom_rect(aes(xmin = start_date_17, xmax = end_date_17, ymin = 4, ymax = 16), 
+            color = "blue", alpha=0.001)
+
+
+WS13_temp_plot
+
+temp_SI_WS13_expt <- temp_SI_WS13_sep22 %>% filter(between(date, start_date_17, end_date_17))
+mean(temp_SI_WS13_expt$temp.celsius)
+sd(temp_SI_WS13_expt$temp.celsius)
+median(temp_SI_WS13_expt$temp.celsius)
+min(temp_SI_WS13_expt$temp.celsius)
+max(temp_SI_WS13_expt$temp.celsius)
+
+```
+
+Temp 2-panel
+```{r}
+
+library(cowplot)
+temp_channels_WS13 <- plot_grid(temps_time_series_datetime, WS13_temp_plot, labels = c('A', 'B'))
+
+
+jpeg(filename="temp_channels_WS13.jpeg",
+     width=45, height=20, units="cm", pointsize=12, bg="white", res=600)
+temp_channels_WS13
+dev.off()
+```
+
+Get temp values for USHF and all the channels
+```{r}
+
+USHF <- read.csv("USHF_10951957_9736055_all.csv")
+USHF <- USHF %>% mutate(date=mdy(date))
+
+expt_start_2019 <- as.Date("2019-03-12")
+expt_end_2019 <- as.Date("2019-04-17")
+
+USHF_expt <- USHF %>% filter(between(date, expt_start_2019, expt_end_2019))
+mean(USHF_expt$temp.celsius)
+sd(USHF_expt$temp.celsius)
+median(USHF_expt$temp.celsius)
+min(USHF_expt$temp.celsius)
+max(USHF_expt$temp.celsius)
+
+```
+
+
+
+
+

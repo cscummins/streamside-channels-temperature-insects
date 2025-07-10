@@ -1,0 +1,309 @@
+---
+title: "Growth rate analysis_5May2020_UPDATED"
+author: "Carolyn Cummins"
+date: "5/5/2020"
+output: html_document
+---
+This Rmd file contains the data carpentry and analysis for growth and development rate data from the streamside channels experiment. 
+
+*This script contains only instantaneous growth rate calculations -- IGR = ln(final)-ln(initial)/days (Huryn & Benke 1986, Hauer & Benke 1991, Reynolds & Benke 2005)
+
+```{r}
+
+library(Rmisc)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+library(tidyverse)
+photos.beg.all<-read.csv("SSC2019.photos.beg.csv")
+photos.end.all<-read.csv("SSC2019.photos.end.csv")
+
+```
+
+
+Merge beginning and ending data, process
+```{r}
+
+merged.photos.all<-merge(photos.beg.all,photos.end.all,by=c("Chamber", "Channel", "Temp.TRT", "Leaf.spp."))
+
+merged.photos.all<-merged.photos.all[-c(11:17, 23:29)]
+
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.x"] <- "Notes.beg"
+
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.y"] <- "Notes.end"
+
+```
+
+
+Add in estimated masses using DM=aL^b (Benke et al. 1999)
+```{r}
+
+merged.photos.all$beg.mass.mg<-((merged.photos.all$Beg.Length.mm^2.737)*(0.0170))
+
+merged.photos.all$end.mass.mg<-((merged.photos.all$End.Length.mm^2.737)*(0.0170))
+
+merged.photos.all$igr<-(((log(merged.photos.all$end.mass.mg))-(log(merged.photos.all$beg.mass.mg)))/(merged.photos.all$Days.in.expt))
+
+```
+
+
+#determining outliers -- 2 sds above or below the mean!
+```{r}
+
+#standard deviation method (outliers are those observations that lie outside 2 sds from the mean)
+mean.igr.all<-mean(merged.photos.all$igr)
+
+twosd.igr.all<-2*sd(merged.photos.all$igr)
+
+UL.igr.all<-mean.igr.all+twosd.igr.all
+
+LL.igr.all<-mean.igr.all-twosd.igr.all
+
+```
+
+
+#processing and subsetting - exclude outliers, then make separate dataframes for Rhodo and Acer
+```{r}
+
+merged.photos.all2<-merged.photos.all[which(merged.photos.all$igr<UL.igr.all),]
+
+merged.photos.all3<-merged.photos.all2[which(merged.photos.all2$igr>LL.igr.all),]
+
+merged.photos.allR<-merged.photos.all3[which(merged.photos.all3$Leaf.spp.=="Rhodo"),]
+
+merged.photos.allA<-merged.photos.all3[which(merged.photos.all3$Leaf.spp.=="Acer"),]
+#excluded a total of 9 outliers from the whole dataset.
+
+```
+
+
+*Figuring out what is going on with Rhodo 4, which has highly variable estimates of IGR compared to the other trts*
+```{r}
+
+merged.photos.all.four.orig<-merged.photos.all[which(merged.photos.all$Temp.TRT==4),]
+
+merged.photos.all.four<-merged.photos.all3[which(merged.photos.all3$Temp.TRT==4),]
+
+identical(merged.photos.all.four, merged.photos.all.four.orig)
+#these are the same, meaning that excluding outliers that were 2 sds above or below the mean did not exclude any observations from the +4 treatment.
+
+```
+
+
+Summary by channel
+```{r}
+
+summSE.bychannel.igr<-summarySE(merged.photos.all3,measurevar="igr",groupvars=c("Channel","Leaf.spp.", "Temp.TRT"),na.rm=TRUE)
+#produces NA's for Rhodo 4A because there was only one bug in that channel at the end of the experiment.
+
+summSE.bychannel.igr$Temp.TRT<-as.numeric(summSE.bychannel.igr$Temp.TRT)
+
+summ.SE.bychannel.R.igr<-summSE.bychannel.igr[which(summSE.bychannel.igr$Leaf.spp.=="Rhodo"),]
+
+summ.SE.bychannel.A.igr<-summSE.bychannel.igr[which(summSE.bychannel.igr$Leaf.spp.=="Acer"),]
+
+```
+
+
+Summary by treatment
+```{r}
+
+summSE.bytrt.igr <- summarySE(summSE.bychannel.igr, measurevar="igr", groupvars=c("Temp.TRT","Leaf.spp."), na.rm=TRUE)
+summSE.bytrt.igr2 <- summarySE(merged.photos.all3, measurevar = "igr", groupvars=c("Temp.TRT", "Leaf.spp."), na.rm=TRUE)
+#I think the second one is right - use all the bugs in the trt instead of taking a mean of means
+
+```
+
+
+Graphs based on means of means (mean igr by trt generated from means by channel)
+```{r}
+
+library(scales)
+show_col(viridis_pal(option="C")(20))
+
+black.bold.text<-element_text(face = "bold", color = "black", size=14)
+black.bold.text.labs<-element_text(face="bold", color="black", size=12)
+black.bold.text.leg<-element_text(face="bold", color="black", size=10)
+
+barplot.1.byspp <- ggplot(summSE.bytrt.igr, aes(x=Temp.TRT, y=igr, group=Leaf.spp., color=Leaf.spp.))+
+   theme_classic()+
+   geom_bar(aes(fill = Leaf.spp.), width = 0.4, position = position_dodge(width=0.5), stat="identity")+  
+   theme(legend.position="right", legend.title=element_blank())+
+   xlab("Temperature treatment")+
+   ylab("Instantaneous Growth Rate")+
+   geom_errorbar(aes(ymin=igr-se,ymax=igr+se), width=.2, position=position_dodge(width=0.5))+
+   scale_fill_manual(values=c("#F7E225FF", "#3F4788FF"))+
+   scale_color_manual(values=c("black","black"))+
+   theme(legend.title=element_blank())+
+   theme(axis.title=black.bold.text)+
+   theme(axis.text=black.bold.text.labs)+
+   theme(axis.title.x=element_text(vjust=-0.5))+
+   theme(axis.title.y=element_text(vjust=1.5))+
+   theme(legend.text = black.bold.text.leg)+
+   scale_x_continuous(breaks=0:4, labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))
+
+barplot.1.byspp
+
+scatterplot.1.byspp<-ggplot(summSE.bytrt.igr, aes(x=Temp.TRT, y=igr, group=Leaf.spp., color=Leaf.spp.))+
+   theme_classic()+
+   geom_point(position=position_dodge(width=0.5))+  
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Temperature treatment")+
+   ylab("Instantaneous Growth Rate (mg/day)")+
+   geom_errorbar(aes(ymin=igr-se, ymax=igr+se), width=.2,position=position_dodge(width=0.5))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"))+
+   theme(legend.title=element_blank())+
+   theme(axis.title=black.bold.text)+
+   theme(axis.text=black.bold.text.labs)+
+   theme(axis.title.x=element_text(vjust=-0.5))+
+   theme(axis.title.y=element_text(vjust=1.5))+
+   theme(legend.text = black.bold.text.leg)+
+   scale_x_continuous(breaks=0:4, labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))+
+   geom_smooth(method="lm", data=merged.photos.allA)+
+   theme(axis.text=element_text(size=14))+
+   theme(axis.title=element_text(size=18))+
+   theme(legend.text=element_text(size=14))
+
+scatterplot.1.byspp
+
+```
+
+
+Graphs based on raw means by trt (mean is mean igr of all bugs across all channels)
+```{r}
+
+barplot.2.byspp <- ggplot(summSE.bytrt.igr2, aes(x=Temp.TRT, y=igr, group=Leaf.spp., color=Leaf.spp.))+
+   theme_classic()+
+   geom_bar(aes(fill = Leaf.spp.), width = 0.4, position = position_dodge(width=0.5), stat="identity")+  
+   theme(legend.position="right", legend.title=element_blank())+
+   xlab("Temperature treatment")+
+   ylab("Instantaneous Growth Rate")+
+   geom_errorbar(aes(ymin=igr-se,ymax=igr+se), width=.2, position=position_dodge(width=0.5))+
+   scale_fill_manual(values=c("#F7E225FF", "#3F4788FF"))+
+   scale_color_manual(values=c("black","black"))+
+   theme(legend.title=element_blank())+
+   theme(axis.title=black.bold.text)+
+   theme(axis.text=black.bold.text.labs)+
+   theme(axis.title.x=element_text(vjust=-0.5))+
+   theme(axis.title.y=element_text(vjust=1.5))+
+   theme(legend.text = black.bold.text.leg)+
+   scale_x_continuous(breaks=0:4, labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))
+
+barplot.2.byspp
+
+scatterplot.2.byspp<-ggplot(summSE.bytrt.igr2, aes(x=Temp.TRT, y=igr, group=Leaf.spp., color=Leaf.spp.))+
+   theme_classic()+
+   geom_point(position=position_dodge(width=0.5))+  
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Temperature treatment")+
+   ylab(expression(atop(paste("Instantaneous Growth Rate"), "(mg d"^-1*")")))+
+   geom_errorbar(aes(ymin=igr-se, ymax=igr+se), width=.2,position=position_dodge(width=0.5))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+   scale_x_continuous(breaks=0:4, labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))+
+   geom_smooth(method="lm", data=merged.photos.allA)+
+   theme(axis.text=element_text(size=14))+
+   theme(axis.title=element_text(size=18))+
+   theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)
+
+scatterplot.2.byspp
+
+```
+
+```{r}
+jpeg(filename="scatterplot.growth.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+scatterplot.2.byspp
+dev.off()
+```
+
+
+lmer models - main analysis
+```{r}
+#Rhodo data only - does temperature have an effect on igr for bugs fed Rhodo?
+model2.Rhodo.data <- lmer(igr ~ Temp.TRT + (1|Channel), data=merged.photos.allR)
+summary(model2.Rhodo.data)
+
+#Acer data only - does temperature have an effect on igr for bugs fed Acer?
+model3.Acer.data <- lmer(igr ~ Temp.TRT + (1|Channel), data=merged.photos.allA)
+summary(model3.Acer.data)
+
+#Does the effect of temperature on igr depend on leaf species?
+model4.all.int.bylfsp <- lmer(igr ~ Temp.TRT*Leaf.spp. + (1|Channel), data=merged.photos.all3)
+summary(model4.all.int.bylfsp)
+
+```
+
+
+
+lmer models - extra/unnecessary
+```{r}
+
+#all the data - does temperature have an effect on igr overall (both leaf species)
+model1.all.data <- lmer(igr ~ Temp.TRT + (1|Channel), data=merged.photos.all3)
+summary(model1.all.data)
+#yes - marginally significant
+
+#Is the effect of temperature on igr quadratic for Rhodo?
+lm.all.Rquad.sp <- lmer(igr ~ Temp.TRT+I(Temp.TRT^2) + (1|Channel), data=merged.photos.allR)
+summary(lm.all.Rquad.sp)
+#no
+
+```
+
+
+
+Development rate analysis
+
+Read in the development rate data
+```{r}
+
+BWP<-read.csv("SSC2019_BWP.csv")
+BWP$prop.BWP<-BWP$BWP/BWP$bugs.rem
+
+```
+
+
+```{r}
+
+summSE.BWP<-summarySE(BWP,measurevar="BWP",groupvars="Temp.TRT",na.rm=TRUE)
+summSE.BWP2<-summarySE(BWP,measurevar="prop.BWP",groupvars="Temp.TRT",na.rm=TRUE)
+
+```
+
+
+#Binomial regression analysis!
+```{r}
+
+bin.dev<-glm(cbind(BWP,no.BWP)~Temp.TRT,data=BWP,family=binomial)
+summary(bin.dev)
+
+```
+
+
+#adding line to dev graph
+```{r}
+
+dummy.data<-data.frame(Temp.TRT=seq(0,4,by=0.1))
+dummy.data$fit<-predict.glm(bin.dev,newdata=dummy.data,type="response")
+
+```
+
+
+```{r}
+
+plot.BWP<-ggplot(summSE.BWP2, aes(x=Temp.TRT, y=prop.BWP))+theme_classic()+geom_bar(color="black", fill="darkgrey", 
+   width = 0.4, position = position_dodge(width=0.5), stat="identity") +  
+   theme(legend.position="right", legend.title = 
+   element_blank())+xlab("Temperature treatment")+ylab("Proportion of insects with black wingpads")+geom_errorbar(aes(ymin=prop.BWP-se, ymax=prop.BWP+se), width=.2,position = position_dodge(width=0.5))+geom_line(data=dummy.data,aes(x=Temp.TRT,y=fit))+theme(axis.title=black.bold.text)+
+   theme(axis.text=black.bold.text.labs)+theme(axis.title.x=element_text(vjust=-0.5))+theme(axis.title.y=element_text(vjust=1.5))+scale_x_continuous(breaks=0:4, labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))+theme(axis.text=element_text(size=14))+theme(axis.title=element_text(size=18))+theme(legend.text=element_text(size=14))
+
+plot.BWP
+
+```
+
+
+

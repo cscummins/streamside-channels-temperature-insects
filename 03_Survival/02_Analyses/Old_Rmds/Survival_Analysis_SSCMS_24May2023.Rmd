@@ -1,0 +1,215 @@
+---
+title: "Survivorship analysis - SSC"
+author: "Carolyn Cummins"
+date: "5/2023"
+output: html_document
+---
+
+
+**Survival analysis for streamside channels experiment 2019**
+
+
+Load packages, read in survivorship data
+```{r}
+
+library(survival)
+library(ggfortify)
+library(ranger)
+library(viridis)
+library(survminer)
+library(tidyverse)
+
+surv.data<-read.csv("Survivorship_data_20May2020.csv")
+surv.data<-surv.data[-c(8:15)]#delete extraneous columns
+
+```
+
+
+
+*Data carpentry*
+```{r}
+
+surv.data$trt_ID<-paste(surv.data$channel,surv.data$leaf.sp,sep="-")
+
+initial_counts<-surv.data[1:40,] #first 40 columns contain the initial number of insects in each treatment
+
+surv.data2<-surv.data[41:nrow(surv.data),] #last 40 columns contain the survivorship observations  for the rest of the experiment
+
+day_sampled<-as.numeric(levels(as.factor(as.character(surv.data$days.since.start)))) #experiment days we checked the channels for survivorship
+
+IDS<-levels(as.factor(surv.data$trt_ID))
+
+```
+
+
+for-loop to create a long version of the survivorship data
+```{r}
+long_surv_data<-data.frame()
+
+for (i in 1:nrow(surv.data2)){
+
+  
+  surv.data1<-surv.data2[i,]
+  previous_sample<-surv.data[i,]
+  
+  initial<-initial_counts[initial_counts$trt_ID==surv.data1$trt_ID,]
+  
+  survivors<-surv.data1$X.surviving
+  dead<-initial$X.surviving-surv.data1$X.surviving
+  
+  surv.data3<-data.frame(Temp=surv.data1$temp.trt,Leaf.sp=surv.data1$leaf.sp,date=surv.data1$date,end_day=surv.data1$days.since.start,start_day=previous_sample$days.since.start,ID=surv.data1$trt_ID
+                 ,status=c(rep(0,survivors),rep(1,dead)))
+  
+  long_surv_data<-rbind(long_surv_data,surv.data3)
+}
+
+#"status" is the status of each bug in each treatment in the experiment on a given day. 0=alive, 1=dead. Should be 8 bugs with a "status" associated per species per channel
+```
+
+
+
+
+*Survival objects and curves*
+
+Make a survivorship object
+```{r}
+
+survival_object1 <- Surv(time=long_surv_data$start_day,
+                        time2=long_surv_data$end_day,
+                        event=long_surv_data$status,
+                        type="interval")
+
+```
+
+*USING SURVFIT TO VISUALIZE SURVIVAL PROBABILITY CURVES*
+
+Survival curve 1: fits all the data to one model and shows the probability of surviving as the experiment goes on - not split out by temperature or leaf type. 
+```{r}
+
+surv.curve.1 <- survfit(survival_object1~1, data=long_surv_data)
+summary(surv.curve.1)
+autoplot(surv.curve.1)
+
+```
+
+
+Survival curve 2: Leaf species
+```{r}
+
+surv.curve.2.leaf <- survfit(survival_object1~Leaf.sp,data=long_surv_data)
+
+summary(surv.curve.2.leaf)
+
+survleaf.plot <- ggplot(surv.curve.2.leaf,aes(x=time,y=surv,color=strata, fill=strata))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(aes(ymin=surv.curve.2.leaf$lower, ymax=surv.curve.2.leaf$upper), show.legend=FALSE, linetype=0, alpha=0.25)+
+  xlab("Time (days)")+ylab("Survival probability")+
+  scale_color_manual(values=c("#440154FF", "#E85362FF"),
+                     name="Leaf type",
+                     breaks=c("Acer", "Rhodo"),
+                     labels=c("Acer", "Rhodo"))+
+  scale_fill_manual(values=c("#440154FF", "#E85362FF"), guide=FALSE)+
+  theme(legend.title=element_blank())+
+  geom_point()
+
+survleaf.plot
+
+```
+
+
+Survival curve 3: Temperature
+```{r}
+
+surv.curve.3.temp <- survfit(survival_object1~Temp,data=long_surv_data)
+summary(surv.curve.3.temp)
+
+black.bold.text<-element_text(face = "bold", color = "black", size=14)
+black.bold.text.labs<-element_text(face="bold", color="black", size=12)
+black.bold.text.leg<-element_text(face="bold", color="black", size=10)
+
+survtemp.plot <- ggplot(surv.curve.3.temp,aes(x=time,y=surv,color=strata, fill=strata))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(aes(ymin=surv.curve.3.temp$lower, ymax=surv.curve.3.temp$upper), show.legend=FALSE, linetype=0, alpha=0.25)+
+  xlab("Time (days)")+
+  ylab("Survival probability")+
+  scale_color_manual(values=c("#08051EFF", "#5C126EFF", "#C43C4EFF", "#F8870EFF", "#F7D340FF"),
+                     breaks=c("0", "1", "2", "3", "4"),
+                     labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))+
+  scale_fill_manual(values=c("#08051EFF", "#5C126EFF", "#C43C4EFF", "#F8870EFF", "#F7D340FF"), guide=FALSE)+
+  theme(legend.title=element_blank())+
+  geom_point()+
+  theme(axis.title=black.bold.text)+
+  theme(axis.text=black.bold.text.labs)+
+  theme(axis.title.x = element_text(vjust=-0.5))+
+  theme(axis.title.y = element_text(vjust=1.5))+
+  theme(legend.text = black.bold.text.leg)+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))
+
+survtemp.plot
+
+```
+
+
+*MODELS*
+Statistical models to test for effects of both temperature and leaf type, as well as their interaction
+```{r}
+#Create new survival object
+survival_object2 <- Surv(time=long_surv_data$start_day+0.01,
+                         time2=long_surv_data$end_day+0.01,
+                         event=long_surv_data$status,
+                         type="interval")
+
+#survival_object2 is the same as survival_object1, except we need to add a little bit to each day. This is because the survreg function cannot handle 0 values of day
+
+model1_leaf_temp_interaction <- survreg(survival_object2 ~ Temp*Leaf.sp, data=long_surv_data, dist="exponential")
+
+round(anova(model1_leaf_temp_interaction),2)
+
+summary(model1_leaf_temp_interaction)
+#Temperature has a significant negative effect on survival (p=1.7e-08)
+#Leaf species has no significant effect on survival
+#The interaction between temperature and leaf species is not significant
+
+```
+
+
+This model accounts for the repeated measurements within a treatment and tests for statistical significance:
+```{r}
+
+model2_leaf_temp_interaction <- survreg(survival_object2 ~ Temp*Leaf.sp + frailty.gaussian(long_surv_data$ID),
+                                        data=long_surv_data,
+                                        dist="exponential")
+#NOTE 31Jul23 - frailty.gaussian term no longer works after updating packages.. Apparently this usage of frailty terms was never supported by survreg according to the updates page for the survival package...
+
+round(anova(model2_leaf_temp_interaction),4)#error because frailty term didn't work
+summary(model2_leaf_temp_interaction)#error because frailty term didn't work
+
+###
+
+#31 July 2023 - try replacing frailty term with "+cluster(long_surv_data$ID)"
+model2a_leaf_temp_interaction <- survreg(survival_object2 ~ Temp*Leaf.sp + cluster(long_surv_data$ID),data=long_surv_data,dist="exponential")
+round(anova(model2a_leaf_temp_interaction),4)
+summary(model2a_leaf_temp_interaction)
+
+#works - slightly different values in table but same results statistically -- does this solution work??
+
+```
+
+
+Since neither leaf species nor temp*leaf species is significant, here is a new model that excludes leaf species
+```{r}
+
+model3_temp_only <- survreg(survival_object2 ~ Temp + cluster(long_surv_data$ID), data=long_surv_data,dist="exponential")
+#Note 31 July 23 - replaced frailty term with "+cluster(long_surv_data$ID)"
+
+round(anova(model3_temp_only),4)
+
+summary(model3_temp_only)
+
+```
+
+

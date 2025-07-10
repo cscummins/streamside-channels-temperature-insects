@@ -1,0 +1,225 @@
+---
+title: "Growth rate analysis_5May2020_UPDATED"
+author: "Carolyn Cummins"
+date: "5/5/2020"
+output: html_document
+---
+This Rmd file contains the data carpentry and analysis for growth rate data from the streamside channels experiment. 
+
+*IGR = ln(final)-ln(initial)/days (Huryn & Benke 1986, Hauer & Benke 1991, Reynolds & Benke 2005)
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(ggsci)
+library(ggeffects)
+library(Rmisc)
+library(lme4)
+library(lmerTest)
+
+```
+
+
+**First pass at analysis with initial measurements**
+
+Merge beginning and ending data, process
+
+28 November 2023 -- replaced measurements for 3 bugs, A153, R114, and A118, for which I had measured the incorrect photo for either the beginning or end measurement in the initial data.
+```{r}
+
+photos.beg.all<-read.csv("SSC2019.photos.beg.28Nov23.csv")
+photos.end.all<-read.csv("SSC2019.photos.end.28Nov23.csv")
+
+merged.photos.all<-merge(photos.beg.all,photos.end.all,by=c("Chamber", "Channel", "Temp.TRT", "Leaf.spp."))
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.x"] <- "Notes.beg"
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.y"] <- "Notes.end"
+
+```
+
+
+Add in estimated masses using DM=aL^b (Benke et al. 1999)
+ADH - a = 0.0194, b = 2.853 - based on AFDM (percent ash = 2.6)
+```{r}
+
+merged.photos.all <- merged.photos.all %>% mutate(end.minus.beg.length.mm=End.Length.mm-Beg.Length.mm)
+merged.photos.all <- merged.photos.all %>% mutate(mag.end.minus.beg.length.mm=abs(end.minus.beg.length.mm))
+
+merged.photos.all$beg.mass.mg<-((merged.photos.all$Beg.Length.mm^2.853)*(0.0194))
+
+merged.photos.all$end.mass.mg<-((merged.photos.all$End.Length.mm^2.853)*(0.0194))
+
+merged.photos.all$igr<-(((log(merged.photos.all$end.mass.mg))-(log(merged.photos.all$beg.mass.mg)))/(merged.photos.all$Days.in.expt))
+
+merged.photos.all$igr_norm <- merged.photos.all$igr/merged.photos.all$beg.mass.mg
+
+```
+
+
+Find bugs for with large length gains or losses... (loss greater than 0.5 mm or gain greater than 1mm)
+```{r}
+
+bugs.length.loss.0.5 <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, mag.end.minus.beg.length.mm) %>% 
+  filter(end.minus.beg.length.mm<(-0.5))
+#20 bugs
+
+bugs.length.gain.greater.1 <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, mag.end.minus.beg.length.mm, Notes.beg, Notes.end) %>% 
+  filter(end.minus.beg.length.mm>(1))
+#13 bugs
+
+bugs.length.loss <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, mag.end.minus.beg.length.mm) %>% 
+  filter(end.minus.beg.length.mm<0)
+#65 bugs
+
+bugs.length.loss.gain.less0.25 <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, mag.end.minus.beg.length.mm) %>%
+  filter(mag.end.minus.beg.length.mm<0.25)
+#72 bugs
+
+```
+
+
+After remeasurement efforts (Nov 2023), found some bug photos that had lost a lot of length according to initial measurements for which the bug in the end photo was very scrunched up. We determined that it would be impossible to get an accurate idea of these bugs' growth during the experiment due to their compromised position in the end photo. We will exclude these bugs from the data going forward
+```{r}
+
+merged.photos.all <- merged.photos.all %>% filter(!Notes.end=="EXCL")
+#excludes 10 bugs
+
+```
+
+
+For bugs whose change in length was than 0.25 mm, set igr equal to zero. We have determined 0.25 mm to be within the margin of error for our photo measurements, so we cannot accurately decipher changes in length that are less than this number. This is why we have decided to set these igrs equal to zero, meaning these bugs likely did not grow during the experiment
+```{r}
+
+merged.photos.all <- merged.photos.all %>% mutate(igr_norm=case_when(mag.end.minus.beg.length.mm<=0.25 ~ 0,
+                                                                           TRUE ~ igr_norm))
+
+```
+
+
+Split into Rhodo and Acer
+```{r}
+
+merged.photos.all.R <- merged.photos.all %>% filter(Leaf.spp.=="Rhodo")
+merged.photos.all.A <- merged.photos.all %>% filter(Leaf.spp.=="Acer")
+
+```
+
+
+Summary by channel
+```{r}
+
+summSE.bychannel.igrnorm <- summarySE(merged.photos.all,measurevar="igr_norm",groupvars=c("Channel","Leaf.spp.", "Temp.TRT"),na.rm=TRUE)
+#produces NA's for Rhodo 4A because there was only one bug in that channel at the end of the experiment.
+
+summSE.bychannel.igrnorm$Temp.TRT<-as.numeric(summSE.bychannel.igrnorm$Temp.TRT)
+
+summ.SE.bychannel.R.igrnorm <- summSE.bychannel.igrnorm[which(summSE.bychannel.igrnorm$Leaf.spp.=="Rhodo"),]
+summ.SE.bychannel.A.igrnorm <- summSE.bychannel.igrnorm[which(summSE.bychannel.igrnorm$Leaf.spp.=="Acer"),]
+
+```
+
+
+Summary by treatment
+```{r}
+
+summSE.bytrt.igrnorm <- summarySE(merged.photos.all, measurevar = "igr_norm", groupvars=c("Temp.TRT", "Leaf.spp."), na.rm=TRUE)
+
+```
+
+
+lmer models -- these are with the updated data (28 Nov 23) excluding bugs whose photos were compromised, as well as excluding one huge outlier in the Acer 3 treatment where the bug was actively emerging in the end photo. For these data, we also set igr equal to zero for any bugs whose measured change in length was less than 0.25mm
+```{r}
+
+#Rhodo data only - does temperature have an effect on igr for bugs fed Rhodo?
+model.Rhodo.igrnorm.data <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.R)
+summary(model.Rhodo.igrnorm.data)
+#no significant effect
+
+#Acer data only - does temperature have an effect on igr for bugs fed Acer?
+model.Acer.igrnorm.data <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.A)
+summary(model.Acer.igrnorm.data)
+#no significant effect
+
+#Does the effect of temperature on igr depend on leaf species?
+model.all.int.igrnorm.bylfsp <- lmer(igr_norm ~ Temp.TRT*Leaf.spp. + (1|Channel), data=merged.photos.all)
+summary(model.all.int.igrnorm.bylfsp)
+#no significant effect
+
+#all the data - does temperature have an effect on igr overall (both leaf species)
+model.all.data.igrnorm <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all)
+summary(model.all.data.igrnorm)
+#marginally significant effect of temperature (p=0.09)
+
+```
+
+
+Graphs based on raw means by trt (mean is mean igrnorm of all bugs across all channels)
+```{r}
+options(scipen=10000)
+
+scatterplot.byspp <- ggplot(summSE.bytrt.igrnorm, aes(x=Temp.TRT, y=igr_norm))+
+  theme_classic()+
+  geom_point(data=summSE.bytrt.igrnorm, position=position_dodge(width=0.5),
+             aes(x=Temp.TRT, y = igr_norm, group=Leaf.spp., color=Leaf.spp.))+
+  geom_errorbar(data=summSE.bytrt.igrnorm, position=position_dodge(width=0.5),
+                aes(x=Temp.TRT, ymin=igr_norm-se, ymax=igr_norm+se, color=Leaf.spp.), width=.2)+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Temperature treatment")+
+   ylab(expression(atop(paste("Specific Growth Rate"), "(mg mg"^-1*" d"^-1*")")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)+
+  scale_y_continuous(limits = c(0, 0.0012), breaks = c(0.0000, 0.0004, 0.0008, 0.0012))+
+  scale_x_continuous(limits=c(-0.2,4.2), breaks=c(0,1,2,3,4), labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))
+
+scatterplot.byspp
+
+```
+
+
+```{r}
+
+jpeg(filename="scatterplot.growth.28Nov23.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+scatterplot.byspp
+dev.off()
+
+```
+
+
+Simple plot of beginning mass vs igr
+```{r}
+
+begmass.igr.model <- lm(igr~beg.mass.mg, data=merged.photos.all)
+summary(begmass.igr.model)
+
+plot.begmass.igr <- ggplot(merged.photos.all, aes(x=beg.mass.mg, y=igr)) + theme_classic() + geom_smooth(method="lm") + geom_point()
+plot.begmass.igr
+
+```
+
+
+Create a df with beginning lengths and masses to use in consumption analysis, then write that csv
+```{r}
+
+photos.beg.all$beg.mass.mg<-((photos.beg.all$Beg.Length.mm^2.737)*(0.0170))
+
+begin.lengths.masses <- photos.beg.all %>% select(Temp.TRT, Channel, Chamber, Leaf.spp., Beg.Length.mm, beg.mass.mg)
+write.csv(begin.lengths.masses, "begin.lengths.masses.csv")
+
+```
+
+

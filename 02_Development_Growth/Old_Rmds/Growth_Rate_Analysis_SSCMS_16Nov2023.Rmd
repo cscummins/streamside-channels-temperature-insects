@@ -1,0 +1,326 @@
+---
+title: "Growth rate analysis_5May2020_UPDATED"
+author: "Carolyn Cummins"
+date: "5/5/2020"
+output: html_document
+---
+This Rmd file contains the data carpentry and analysis for growth rate data from the streamside channels experiment. 
+
+*IGR = ln(final)-ln(initial)/days (Huryn & Benke 1986, Hauer & Benke 1991, Reynolds & Benke 2005)
+
+```{r}
+
+library(Rmisc)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+library(tidyverse)
+library(ggsci)
+library(ggeffects)
+photos.beg.all<-read.csv("SSC2019.photos.beg.csv")
+photos.end.all<-read.csv("SSC2019.photos.end.csv")
+
+```
+
+
+Merge beginning and ending data, process
+```{r}
+
+merged.photos.all<-merge(photos.beg.all,photos.end.all,by=c("Chamber", "Channel", "Temp.TRT", "Leaf.spp."))
+merged.photos.all<-merged.photos.all[-c(11:17, 23:29)]
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.x"] <- "Notes.beg"
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.y"] <- "Notes.end"
+
+```
+
+
+Add in estimated masses using DM=aL^b (Benke et al. 1999)
+```{r}
+
+merged.photos.all$beg.mass.mg<-((merged.photos.all$Beg.Length.mm^2.737)*(0.0170))
+merged.photos.all$end.mass.mg<-((merged.photos.all$End.Length.mm^2.737)*(0.0170))
+merged.photos.all$igr<-(((log(merged.photos.all$end.mass.mg))-(log(merged.photos.all$beg.mass.mg)))/(merged.photos.all$Days.in.expt))
+merged.photos.all$igr_norm <- merged.photos.all$igr/merged.photos.all$beg.mass.mg
+merged.photos.all.R <- merged.photos.all %>% filter(Leaf.spp.=="Rhodo")
+merged.photos.all.A <- merged.photos.all %>% filter(Leaf.spp.=="Acer")
+
+```
+
+
+Find bugs for which there was a loss of greater than 1mm of length from beginning to end
+```{r}
+
+merged.photos.all <- merged.photos.all %>% mutate(end.minus.beg.length.mm=End.Length.mm-Beg.Length.mm)
+merged.photos.all <- merged.photos.all %>% mutate(mag.end.minus.beg.length.mm=abs(end.minus.beg.length.mm))
+
+merged.photos.all <- merged.photos.all %>% mutate(percent.length=((end.minus.beg.length.mm/Beg.Length.mm)*100))
+hist(merged.photos.all$percent.length)
+
+bugs.length.loss.0.5 <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, percent.length, mag.end.minus.beg.length.mm) %>% 
+  filter(end.minus.beg.length.mm<(-0.5))
+
+bugs.length.loss <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, percent.length, mag.end.minus.beg.length.mm) %>% 
+  filter(end.minus.beg.length.mm<(-0))
+
+bugs.length.loss.gain.less0.2 <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, percent.length, mag.end.minus.beg.length.mm) %>%
+  filter(mag.end.minus.beg.length.mm<0.2)
+
+bugs.length.gain.greater.1 <- merged.photos.all %>% 
+  select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Length.mm, Image, End.Length.mm,
+         Image.end, end.minus.beg.length.mm, percent.length, mag.end.minus.beg.length.mm, Notes.beg, Notes.end) %>% 
+  filter(end.minus.beg.length.mm>(1))
+
+```
+
+
+Summary by channel
+```{r}
+
+summSE.bychannel.igrnorm <- summarySE(merged.photos.all,measurevar="igr_norm",groupvars=c("Channel","Leaf.spp.", "Temp.TRT"),na.rm=TRUE)
+#produces NA's for Rhodo 4A because there was only one bug in that channel at the end of the experiment.
+summSE.bychannel.igrnorm$Temp.TRT<-as.numeric(summSE.bychannel.igrnorm$Temp.TRT)
+summ.SE.bychannel.R.igrnorm <- summSE.bychannel.igrnorm[which(summSE.bychannel.igrnorm$Leaf.spp.=="Rhodo"),]
+summ.SE.bychannel.A.igrnorm <- summSE.bychannel.igrnorm[which(summSE.bychannel.igrnorm$Leaf.spp.=="Acer"),]
+
+```
+
+
+Summary by treatment
+```{r}
+
+summSE.bytrt.igrnorm <- summarySE(merged.photos.all, measurevar = "igr_norm", groupvars=c("Temp.TRT", "Leaf.spp."), na.rm=TRUE)
+summSE.bytrt.igrnorm.lngth <- summarySE(merged.photos.all, measurevar = "igr_norm", groupvars=c("Temp.TRT", "Leaf.spp."), na.rm=TRUE)
+
+
+```
+
+
+lmer models
+```{r}
+
+#Rhodo data only - does temperature have an effect on igr for bugs fed Rhodo?
+model.Rhodo.igrnorm.data <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.R)
+summary(model.Rhodo.igrnorm.data)
+
+#Acer data only - does temperature have an effect on igr for bugs fed Acer?
+model.Acer.igrnorm.data <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.A)
+summary(model.Acer.igrnorm.data)
+
+#Does the effect of temperature on igr depend on leaf species?
+model.all.int.igrnorm.bylfsp <- lmer(igr_norm ~ Temp.TRT*Leaf.spp. + (1|Channel), data=merged.photos.all)
+summary(model.all.int.igrnorm.bylfsp)
+#temp and leaf spp are significant for this but not the interaction. I think this is telling me that, overall, temperature increased growth rate in the experiment regardless of leaf species. Also that Rhodo had a higher intercept for growth rate than did Acer?
+#but how can it be that, when we model each leaf species separately, there is a significant effect for Acer but not Rhodo, but then when we use all the data, we see that there is no significant interaction??
+
+#all the data - does temperature have an effect on igr overall (both leaf species)
+model.all.data.igrnorm <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all)
+summary(model.all.data.igrnorm)
+#yes - marginally significant (p=0.07)
+
+```
+
+Create ggpredict line and confidence interval for Acer
+```{r}
+
+pred.acer.igrnorm <- ggpredict(model.Acer.igrnorm.data, terms="Temp.TRT")
+
+```
+
+
+Graphs based on raw means by trt (mean is mean igrnorm of all bugs across all channels)
+```{r}
+options(scipen=10000)
+
+scatterplot.byspp <- ggplot(pred.acer.igrnorm)+
+  theme_classic()+
+  geom_ribbon(aes(x = x, ymin = conf.low, ymax = conf.high), alpha = 0.25)+
+  geom_line(color="#FEB72DFF", aes(x=x, y=predicted))+
+  geom_point(data=summSE.bytrt.igrnorm, position=position_dodge(width=0.5),
+             aes(x=Temp.TRT, y = igr_norm, group=Leaf.spp., color=Leaf.spp.))+
+  geom_errorbar(data=summSE.bytrt.igrnorm, position=position_dodge(width=0.5),
+                aes(x=Temp.TRT, ymin=igr_norm-se, ymax=igr_norm+se, color=Leaf.spp.), width=.2)+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Temperature treatment")+
+   ylab(expression(atop(paste("Specific Growth Rate"), "(mg mg"^-1*" d"^-1*")")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)+
+    scale_y_continuous(limits = c(-0.0003, 0.0025), breaks = c(0.0000, 0.001, 0.002))+
+    scale_x_continuous(limits=c(-0.2,4.2), breaks=c(0,1,2,3,4), labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))
+
+scatterplot.byspp
+
+```
+
+
+```{r}
+
+#jpeg(filename="scatterplot.growth.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#scatterplot.2.byspp
+#dev.off()
+
+```
+
+
+Simple plot of beginning mass vs igr
+```{r}
+
+begmass.igr.model <- lm(igr~beg.mass.mg, data=merged.photos.all)
+summary(begmass.igr.model)
+
+plot.begmass.igr <- ggplot(merged.photos.all, aes(x=beg.mass.mg, y=igr)) + theme_classic() + geom_smooth(method="lm") + geom_point()
+plot.begmass.igr
+
+```
+
+Try with the cleaned up growth data and remeasured photos
+```{r}
+
+photos.beg.all.re <- read.csv("SSC2019.photos.beg.remeas_27Nov23.csv")
+photos.end.all.re <- read.csv("SSC2019.photos.end.remeas_27Nov23.csv")
+
+merged.photos.all.re <- merge(photos.beg.all.re, photos.end.all.re, by=c("Chamber", "Channel", "Temp.TRT", "Leaf.spp."))
+colnames(merged.photos.all.re)[colnames(merged.photos.all.re)=="Notes.x"] <- "Notes.beg"
+colnames(merged.photos.all.re)[colnames(merged.photos.all.re)=="Notes.y"] <- "Notes.end"
+```
+
+
+Replace end and beginning lengths with remeasured values for the bugs that got remeasured
+```{r}
+merged.photos.all.re <- merged.photos.all.re %>% 
+     rowwise() %>% mutate(beg.length.qcd.mm = (mean(c(Remeas.1.x, Remeas.2.x, Remeas.3.x), na.rm = T))) 
+
+merged.photos.all.re <- merged.photos.all.re %>% 
+     rowwise() %>% mutate(end.length.qcd.mm = (mean(c(Remeas.1.y, Remeas.2.y, Remeas.3.y), na.rm = T)))
+
+merged.photos.all.re<- merged.photos.all.re %>% mutate(beg.length.qcd.mm=case_when(beg.length.qcd.mm=="NaN" ~ Beg.Length.mm, TRUE ~ beg.length.qcd.mm))
+
+merged.photos.all.re<- merged.photos.all.re %>% mutate(end.length.qcd.mm=case_when(end.length.qcd.mm=="NaN" ~ End.Length.mm, TRUE ~ end.length.qcd.mm))
+
+merged.photos.all.re <- merged.photos.all.re %>% mutate(end.minus.beg.length.qcd.mm=end.length.qcd.mm-beg.length.qcd.mm)
+merged.photos.all.re <- merged.photos.all.re %>% mutate(end.minus.beg.abs=abs(end.minus.beg.length.qcd.mm))
+
+```
+
+
+Exclude samples with QC flags bugs whose measured change in length was less than a quarter mm (less than 0.25)
+```{r}
+
+merged.photos.all.re <- merged.photos.all.re %>% filter(!QC.x=="EXCL" && !QC.y=="EXCL")
+
+```
+
+
+Add in estimated masses using DM=aL^b (Benke et al. 1999)
+```{r}
+
+merged.photos.all.re$beg.mass.mg.qcd<-((merged.photos.all.re$beg.length.qcd.mm^2.737)*(0.0170))
+merged.photos.all.re$end.mass.mg.qcd<-((merged.photos.all.re$end.length.qcd.mm^2.737)*(0.0170))
+merged.photos.all.re$igr<-(((log(merged.photos.all.re$end.mass.mg.qcd))-(log(merged.photos.all.re$beg.mass.mg.qcd)))/(merged.photos.all.re$Days.in.expt))
+merged.photos.all.re$igr_norm <- merged.photos.all.re$igr/merged.photos.all.re$beg.mass.mg.qcd
+
+```
+
+
+For bugs whose change in length was than 0.25 mm, set igr equal to zero
+```{r}
+
+merged.photos.all.re <- merged.photos.all.re %>% mutate(igr_norm=case_when(end.minus.beg.abs<=0.25 ~ 0,
+                                                                           TRUE ~ igr_norm))
+
+```
+
+
+```{r}
+
+merged.photos.all.re.R <- merged.photos.all.re %>% filter(Leaf.spp.=="Rhodo")
+merged.photos.all.re.A <- merged.photos.all.re %>% filter(Leaf.spp.=="Acer")
+
+```
+
+
+Summary by channel
+```{r}
+
+summSE.bychannel.igrnorm.re <- summarySE(merged.photos.all.re,measurevar="igr_norm",groupvars=c("Channel","Leaf.spp.", "Temp.TRT"),na.rm=TRUE)
+#produces NA's for Rhodo 4A because there was only one bug in that channel at the end of the experiment.
+summSE.bychannel.igrnorm.re$Temp.TRT<-as.numeric(summSE.bychannel.igrnorm.re$Temp.TRT)
+summ.SE.bychannel.R.igrnorm.re <- summSE.bychannel.igrnorm.re[which(summSE.bychannel.igrnorm.re$Leaf.spp.=="Rhodo"),]
+summ.SE.bychannel.A.igrnorm.re <- summSE.bychannel.igrnorm.re[which(summSE.bychannel.igrnorm.re$Leaf.spp.=="Acer"),]
+
+```
+
+
+Summary by treatment
+```{r}
+
+summSE.bytrt.igrnorm.re <- summarySE(merged.photos.all.re, measurevar = "igr_norm", groupvars=c("Temp.TRT", "Leaf.spp."), na.rm=TRUE)
+
+```
+
+
+lmer models
+```{r}
+
+#Rhodo data only - does temperature have an effect on igr for bugs fed Rhodo?
+model.Rhodo.igrnorm.data.re <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.re.R)
+summary(model.Rhodo.igrnorm.data.re)
+
+#Acer data only - does temperature have an effect on igr for bugs fed Acer?
+model.Acer.igrnorm.data.re <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.re.A)
+summary(model.Acer.igrnorm.data.re)
+
+#Does the effect of temperature on igr depend on leaf species?
+model.all.int.igrnorm.bylfsp.re <- lmer(igr_norm ~ Temp.TRT*Leaf.spp. + (1|Channel), data=merged.photos.all.re)
+summary(model.all.int.igrnorm.bylfsp.re)
+#temp and leaf spp are significant for this but not the interaction. I think this is telling me that, overall, temperature increased growth rate in the experiment regardless of leaf species. Also that Rhodo had a higher intercept for growth rate than did Acer?
+#but how can it be that, when we model each leaf species separately, there is a significant effect for Acer but not Rhodo, but then when we use all the data, we see that there is no significant interaction??
+
+#all the data - does temperature have an effect on igr overall (both leaf species)
+model.all.data.igrnorm.re <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all.re)
+summary(model.all.data.igrnorm.re)
+#yes - marginally significant (p=0.07)
+
+```
+
+
+Graphs based on raw means by trt (mean is mean igrnorm of all bugs across all channels)
+```{r}
+options(scipen=10000)
+
+scatterplot.byspp <- ggplot(summSE.bychannel.igrnorm.re, aes(x=Temp.TRT, y=igr_norm))+
+  theme_classic()+
+  geom_point(data=summSE.bytrt.igrnorm.re, position=position_dodge(width=0.5),
+             aes(x=Temp.TRT, y = igr_norm, group=Leaf.spp., color=Leaf.spp.))+
+  geom_errorbar(data=summSE.bytrt.igrnorm.re, position=position_dodge(width=0.5),
+                aes(x=Temp.TRT, ymin=igr_norm-se, ymax=igr_norm+se, color=Leaf.spp.), width=.2)+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Temperature treatment")+
+   ylab(expression(atop(paste("Specific Growth Rate"), "(mg mg"^-1*" d"^-1*")")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)+
+    scale_y_continuous(limits = c(0, 0.0017), breaks = c(0.0000, 0.0005, 0.0010, 0.0015))+
+    scale_x_continuous(limits=c(-0.2,4.2), breaks=c(0,1,2,3,4), labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))
+
+scatterplot.byspp
+
+```

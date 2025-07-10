@@ -1,0 +1,620 @@
+---
+title: "Channels_synthesis_growth_dev_consumption"
+author: "Carolyn Cummins"
+date: "2023-12-08"
+output: html_document
+---
+
+This Rmd contains mostly exploratory analyses investigating relationships between consumption, growth, and development. However, we do create MS Figures 5 and S3 in this Rmd. See lines 292-386 and 425-607.
+
+Set working directory to source file location first
+
+Load packages
+```{r}
+
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(tidyverse)
+
+```
+
+
+```{r}
+
+growth_development <- read.csv("growth_development.csv")
+consumption <- read.csv("consumption_rate_to.join.csv")
+#as of 28 March 2024, we will use the modeled mass corrected consumption rate (corrected for the modeled bug mass during the trial based on global mean IGR and bug beginning mass)
+#we will continue to use this as of 10 July 2025
+
+```
+
+
+Rename columns and prep dataframes to join
+```{r}
+
+growth_development <- growth_development %>% 
+           dplyr::rename("exp.start.date" = "Beg.Date",
+           "exp.end.date" = "End.Date",
+           "days.in.expt" = "Days.in.expt",
+           "treatment" = "Temp.TRT",
+           "channel" = "Channel",
+           "chamber" = "Chamber",
+           "leaf" = "Leaf.spp.",
+           "beg.length.mm" = "Beg.Length.mm",
+           "end.Length.mm"="End.Length.mm",
+           "bwp.end"="BWP.end.") %>% 
+  select(-c(X))
+
+
+consumption <- consumption %>% 
+  dplyr::rename("c.trial" = "trial",
+         "c.trial.start.date" = "date.start",
+         "c.trial.end.date" = "date.end",
+         "c.trial.days" = "days",
+         "leaf"="species",
+         "c.trial.mean.temp.C" = "mean_temp_C") %>% 
+  select(-c(X))
+
+consumption <- consumption %>% mutate(leaf=case_when(leaf=="A" ~ "Acer",
+                                                     leaf=="R" ~ "Rhodo"))
+
+growth_development_consumption <- left_join(growth_development, consumption, by=c("treatment", "channel", "chamber", "leaf"))
+
+```
+
+
+Some bugs had repeated measurements of consumption. This chunk creates a df where consumption is averaged across all measurements for a given bug, if applicable
+```{r}
+
+consumption_ave <- consumption %>% group_by(treatment, channel, chamber, leaf) %>%
+  dplyr::summarise(mean_bug_consumption=mean(consumption.bug.mg.day.mcorr.modmasscorr))
+
+growth_development_consumption_averaged <- left_join(growth_development, consumption_ave)
+
+```
+
+
+
+Questions and hypotheses about concurrent measurements of growth, development, and consumption rates
+
+- We expect that there are tradeoffs between energy allocation to growth vs. development
+- As temperatures rise, there is evidence to show that development rate increases faster than growth rate
+- Allocation of consumed carbon to growth vs. development -- can we test this? If so, how?
+
+- Plot consumption rates for bugs that developed black wingpads by the end of the experiment vs. those that did not
+- Plot growth rates for bugs that developed black wingpads by the end of the experiment vs. those that did not
+  - Do this only at the + 3 and +4 treatments where we actually had bugs with bwp?
+  - Maybe we would hypothesize that the bugs that developed faster (i.e., had black wingpads by the end of the experiment) would grow slower?
+  - Maybe we would further hypothesize that the bugs that developed faster (i.e., had black wingpads by the end of the experiment) tended to consume food faster?
+  - But we would also expect that bugs that consumed food faster would grow more
+  - For which parameter is the difference greater between bugs that developed BWP vs. those that did not - growth or consumption? Plot with two y-axes? How do we compare the responses directly?
+
+- Make a plot of growth vs. consumption for the whole dataset - points should be shaped for trial # and colored for temperature
+treatment
+- Plot growth rate and consumption rate across temperatures on the same plot? Compare slopes to compare effects of temperature? Can we do this? If so how?
+- summarize at the channel level first?
+
+Test these three questions first:
+- Does developing faster = growing faster?
+- Does developing faster = consuming more/faster?
+- Does consuming faster = growing faster?
+- Does the relationship between consumption rate and growth rate differ by leaf species? Hypothesis: bugs eating Rhodo will have a harder time converting consumed C into biomass, so the relationship between consumption and growth will be dampened for Rhodo relative to Acer.
+
+Developing faster = growing faster?
+Only look at this for +3 and +4
+```{r}
+
+bwp.growth.consumption.3.4 <- growth_development_consumption %>% filter(treatment==3 | treatment==4) %>% 
+  group_by(bwp.end) %>%
+  dplyr::summarise(
+    average_igr=mean(igr),
+    sd_igr=sd(igr),
+    n_igr=n(),
+    se_igr=sd_igr/sqrt(n_igr),
+    
+    average_igr=mean(igr),
+    sd_igr=sd(igr),
+    n_igr=n(),
+    se_igr=sd_igr/sqrt(n_igr),
+    
+    average_cons_bug_mg.mg.day=mean(consumption.bug.mg.day.mcorr.modmasscorr, na.rm=T),
+    sd_cons_bug_mg.mg.day=sd(consumption.bug.mg.day.mcorr.modmasscorr, na.rm=T),
+    n_cons_bug_mg.mg.day=n(), 
+    se_cons_bug_mg.mg.day=sd_cons_bug_mg.mg.day/sqrt(n_cons_bug_mg.mg.day),)
+
+```
+
+
+IGR by black wingpads
+```{r}
+
+options(scipen=10000)
+
+plot.igr.bwp <- ggplot()+
+  theme_classic()+
+  geom_bar(data=bwp.growth.consumption.3.4, aes(x=bwp.end, y=average_igr, color=bwp.end, fill = bwp.end),
+           width = 0.4, position = position_dodge(width=0.5), stat="identity")+  
+  theme(axis.title.x = element_blank())+
+  ylab("Instantaneous growth rate")+
+  geom_errorbar(data=bwp.growth.consumption.3.4,
+                aes(x=bwp.end, y= average_igr,
+                    ymin=average_igr-se_igr, ymax=average_igr+se_igr,
+                    group=bwp.end),
+                width=.2, position=position_dodge(width=0.5), color= "black")+
+  theme(legend.position='none')+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_x_discrete("bwp.end", labels = c("N" = "No black wingpads", "Y" = "Black wingpads"))+
+  scale_color_manual(values=c("black","black"), guide="none")+
+  scale_fill_manual(values=c("#EC9A29", "#143642"))+
+  scale_y_continuous(limits = c(0, 0.008), breaks = c(0.0000, 0.002, 0.004, 0.006))
+
+plot.igr.bwp
+#note that n = 38 bugs with no bwp vs 11 with bwp
+
+```
+
+Export igr plot for no BWP/BWP
+```{r}
+
+#jpeg(filename="igr.bwp.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#plot.igr.bwp
+#dev.off()
+
+```
+
+
+consumption rate by black wingpads
+```{r}
+
+options(scipen=10000)
+
+plot.consumption.bwp <- ggplot()+
+  theme_classic()+
+  geom_bar(data=bwp.growth.consumption.3.4, aes(x=bwp.end, y=average_cons_bug_mg.mg.day, color=bwp.end, fill = bwp.end),
+           width = 0.4, position = position_dodge(width=0.5), stat="identity")+  
+  theme(axis.title.x = element_blank())+
+   ylab(expression(atop(paste("Consumption Rate"), "(mg mg"^-1*" d"^-1*")")))+
+  geom_errorbar(data=bwp.growth.consumption.3.4,
+                aes(x=bwp.end, y= average_cons_bug_mg.mg.day,
+                    ymin=average_cons_bug_mg.mg.day-se_cons_bug_mg.mg.day, 
+                    ymax=average_cons_bug_mg.mg.day+se_cons_bug_mg.mg.day,
+                    group=bwp.end),
+                width=.2, position=position_dodge(width=0.5), color= "black")+
+  theme(legend.position='none')+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_x_discrete("bwp.end", labels = c("N" = "No black wingpads", "Y" = "Black wingpads"))+
+  scale_color_manual(values=c("black","black"), guide="none")+
+  scale_fill_manual(values=c("#EC9A29", "#143642"))+
+  scale_y_continuous(limits = c(-0.03, 0.32), breaks = c(0.0, 0.1, 0.2, 0.3))
+
+plot.consumption.bwp
+#note that n = 38 bugs with no bwp vs 11 with bwp
+
+```
+
+Export plot of consumption -  no BWP/BWP
+```{r}
+
+#jpeg(filename="consumption.bwp.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#plot.consumption.bwp
+#dev.off()
+
+```
+
+
+Plot of all growth data vs all consumption data -- *consumption rates averaged if there were multiple*. No effect for trial. Color by leaf species
+Clean up the growth consumption dataframe
+First, remove NA's from the df
+Remove one huge consumption rate outlier -- consumption rate = 2.776
+```{r}
+
+growth_development_consumption_averaged.cleaned <- 
+  growth_development_consumption_averaged %>% filter(!is.na(mean_bug_consumption))
+
+growth_development_consumption_averaged.cleaned <- 
+  growth_development_consumption_averaged.cleaned %>% filter(!mean_bug_consumption>2)
+
+```
+
+
+```{r}
+
+growth.v.consumption.plot <- 
+  ggplot(growth_development_consumption_averaged.cleaned,
+         aes(x=mean_bug_consumption, y=igr, color=leaf))+
+  theme_classic()+
+  geom_point(data=growth_development_consumption_averaged.cleaned,
+         aes(x=mean_bug_consumption, y=igr, color=leaf))+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab(expression(atop(paste("Mass-specific consumption rate"), "(mg mg"^-1*" d"^-1*")")))+
+   ylab(expression(atop(paste("Mass-specific growth rate"), "(mg mg"^-1*" d"^-1*")")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)
+
+growth.v.consumption.plot
+
+```
+
+Export the growth vs. consumption plot
+```{r}
+
+#jpeg(filename="growth_v_consumption.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#growth.v.consumption.plot
+#dev.off()
+
+```
+
+
+Clean up the not-averaged gdc df
+```{r}
+
+growth_development_consumption.cleaned <- growth_development_consumption %>% 
+  filter(!is.na(consumption.bug.mg.day.mcorr.modmasscorr))
+
+growth_development_consumption.cleaned <- growth_development_consumption.cleaned %>%
+  filter(!consumption.bug.mg.day.mcorr.modmasscorr>2)
+
+#Trial-specific dataframes
+growth_development_consumption.cleaned.CT1 <- growth_development_consumption.cleaned %>% filter(c.trial=="CT1")
+growth_development_consumption.cleaned.CT2 <- growth_development_consumption.cleaned %>% filter(c.trial=="CT2")
+growth_development_consumption.cleaned.CT3 <- growth_development_consumption.cleaned %>% filter(c.trial=="CT3")
+
+```
+
+
+linear mixed-effects models -- growth as a function of consumption, random effect for trial number and channel?
+```{r}
+
+model.growth.v.consumption <- lmer(igr~mean_bug_consumption*leaf + (1|channel),
+                                   data=growth_development_consumption_averaged.cleaned)
+
+summary(model.growth.v.consumption)
+#no significant relationship between consumption and growth 
+
+
+#Model with no leaf species interaction -- does igr depend on consumption overall (for data across both leaf species?)
+model.growth.v.consumption.2 <- lmer(igr~mean_bug_consumption + (1|channel),
+                                   data=growth_development_consumption_averaged.cleaned)
+
+summary(model.growth.v.consumption.2)
+#no significant relationship between consumption and growth
+
+```
+
+
+
+
+
+
+#####
+
+
+Exploring patterns with fungal biomass
+
+Read in data and add calculations back in (Vlad had done them in Excel, I will do them here in R)
+Correcting for AFDM based on average ash fraction by leaf species calculated from all the microbe chambers in the whole experiment (see consumption rate file for these calcs) 
+```{r}
+
+fungal_biomass_SSC <- read.csv("Ergosterol_SSC_FB_2019_Cummins_cleaned_13Dec2023.csv")
+fungal_biomass_SSC <- fungal_biomass_SSC %>% filter(!QC=="EXCL")
+
+#ash fraction for Rhodo was 0.09529
+#ash fraction for Acer was 0.18979
+
+fungal_biomass_SSC <- fungal_biomass_SSC %>% mutate(dm_g = vial_litter_g - vial_mass_g)
+
+fungal_biomass_SSC <- fungal_biomass_SSC %>% mutate(
+  AFDM_g = case_when(
+    species=="A" ~ (dm_g*(1-0.18979)),
+    species=="R" ~ (dm_g*(1-0.09529)),
+  )
+)
+
+fungal_biomass_SSC <- fungal_biomass_SSC %>% mutate(erg_ug_g_afdm = erg_sample_ug/AFDM_g)
+fungal_biomass_SSC <- fungal_biomass_SSC %>% mutate(fb_mg_g_afdm = erg_ug_g_afdm/5.5)
+
+
+fungal_biomass_SSC <- fungal_biomass_SSC %>% mutate(
+  trial.name = case_when(
+    trial=="CT1" ~ "Trial 1 - 12-20 March 2019",
+    trial=="CT3" ~ "Trial 3 - 10-17 April 2019",
+  )
+)
+
+fungal_biomass_summarized <- fungal_biomass_SSC %>%
+  group_by(trial.name, treatment, species) %>%
+  dplyr::summarise(mean_fb_mg_g_afdm=mean(fb_mg_g_afdm),
+    sd_fb=sd(fb_mg_g_afdm),
+    n_fb=n(),
+    se_fb=sd_fb/sqrt(n_fb))
+
+fungal_biomass_summarized <- fungal_biomass_summarized %>% 
+  mutate(week=case_when(trial.name=="Trial 1 - 12-20 March 2019" ~ "Week 1 - 12-20 March 2019",
+                        trial.name=="Trial 3 - 10-17 April 2019" ~ "Week 5 - 10-17 April 2019"))
+
+
+```
+
+
+Graph!
+*MS Figure 5*
+```{r}
+
+plot.FB <- ggplot()+
+  geom_bar(data=fungal_biomass_summarized, aes(x=treatment, y=mean_fb_mg_g_afdm, fill = species), width=1.5,
+           position = position_dodge(width=1.5), stat="identity")+
+  geom_errorbar(data=fungal_biomass_summarized, 
+                aes(x=treatment, y= mean_fb_mg_g_afdm, ymin=mean_fb_mg_g_afdm-se_fb, ymax=mean_fb_mg_g_afdm+se_fb, group=species),
+                width=.2, position=position_dodge(width=1.5), color= "black")+
+  facet_wrap(~week)+
+  scale_x_continuous(breaks=c(0,2,4),labels=c("+0°C", "+2°C", "+4°C"))+
+  theme_classic()+
+  theme(legend.position="right", legend.title = element_blank())+
+  xlab("Temperature treatment")+
+  ylab(expression(paste("Fungal biomass", " (mg gAFDM"^-1*")")))+
+  scale_color_manual(values=c("black","black"), guide="none")+
+  scale_fill_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                     labels=c(expression(paste(italic("Acer"))),
+                              expression(paste(italic("Rhododendron")))))+
+  theme(legend.text.align=0)+
+  theme(legend.text=element_text(size=10))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+    theme(strip.background = element_rect(color = "white"),
+          strip.placement = "inside",
+          strip.text = element_text(vjust = -1)) + 
+    annotate("segment",x = -1,xend = 5,y = 54,yend = 54, size = 0.5,)+ 
+       theme(strip.text.x = element_text(size = 12, face="bold"))+
+  scale_y_continuous(breaks=c(0,10,20,30,40,50),labels=c("0","10","20","30","40","50"))
+
+plot.FB
+
+
+```
+
+
+Export MS Figure 5
+```{r}
+
+#jpeg(filename="fb_by_trt.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#plot.FB
+#dev.off()
+
+```
+
+
+Plot of channel-level consumption vs. fungal biomass
+First, get channel-level average consumption for each trial
+```{r}
+
+#remove NA's and outlier from consumption data
+consumption <- consumption %>% filter(!is.na(consumption.bug.mg.day.mcorr.modmasscorr))
+consumption <- consumption %>% filter(!consumption.bug.mg.day.mcorr.modmasscorr>2)
+
+consumption_1_3 <- consumption %>% filter(c.trial=="CT1" | c.trial=="CT3")
+consumption_1_3_024 <- consumption_1_3 %>% filter(treatment=="0" | treatment=="2" | treatment=="4")
+
+consumption_1_3_024_channelave <- consumption_1_3_024 %>% group_by(c.trial, c.trial.mean.temp.C, treatment, leaf, channel) %>% 
+  dplyr::summarise(mean_consumption_bug=mean(consumption.bug.mg.day.mcorr.modmasscorr),
+            sd_bug_c=sd(consumption.bug.mg.day.mcorr.modmasscorr),
+            n_bug_c=n(),
+            se_bug=sd_bug_c/sqrt(n_bug_c))
+
+consumption_1_3_024_channelave <- consumption_1_3_024_channelave %>% 
+           dplyr::rename("species" = "leaf",
+                  "trial" = "c.trial")
+
+```
+
+
+join consumption data to fb data
+```{r}
+
+fungal_biomass_SSC <- fungal_biomass_SSC %>% mutate(species=case_when(species=="A" ~ "Acer",
+                                                     species=="R" ~ "Rhodo"))
+
+fb_consumption <- left_join(fungal_biomass_SSC, consumption_1_3_024_channelave)
+fb_consumption_R <- fb_consumption %>% filter(species=="Rhodo") 
+fb_consumption_A <- fb_consumption %>% filter(species=="Acer") 
+
+```
+
+
+Models - consumption vs. fb
+```{r}
+
+model_consumption_fb <- lmer(mean_consumption_bug ~ fb_mg_g_afdm + (1|trial), data=fb_consumption)
+summary(model_consumption_fb)
+
+model_consumption_fb_A <- lmer(mean_consumption_bug ~ fb_mg_g_afdm + (1|trial), data=fb_consumption_A)
+summary(model_consumption_fb_A)
+#no relationship
+
+model_consumption_fb_R <- lmer(mean_consumption_bug ~ fb_mg_g_afdm + (1|trial), data=fb_consumption_R)
+summary(model_consumption_fb_R)
+#higher FB = lower consumption for Rhodo but there is a very small range in FB
+#but higher temp = higher consumption for Rhodo.....
+pred.model_consumption_fb_R <- ggpredict(model_consumption_fb_R, terms="fb_mg_g_afdm")
+
+fb_consumption$species <- as.factor(fb_consumption$species)
+
+model_consumption_fb <- lmer(mean_consumption_bug ~ fb_mg_g_afdm*species + (1|trial), data=fb_consumption)
+summary(model_consumption_fb)
+
+#fb_consumption$species <- factor(fb_consumption$species, levels=rev(levels(fb_consumption$species)))
+
+```
+
+```{r}
+
+fb_consumption_plot <- 
+  ggplot(fb_consumption, aes(x=fb_mg_g_afdm, y=mean_consumption_bug, color=species, shape=trial))+
+  theme_classic()+
+  geom_point(data=fb_consumption, aes(x=fb_mg_g_afdm, y=mean_consumption_bug, color=species, shape=trial))+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab(expression(paste("Fungal biomass", " (mg gAFDM"^-1*")")))+
+   ylab(expression(atop(paste("Mass-specific consumption rate"), "(mg mg"^-1*" d"^-1*")")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)
+
+fb_consumption_plot
+
+```
+
+Acer
+```{r}
+
+fb_consumption_plot_A <- 
+  ggplot(fb_consumption_A, aes(x=fb_mg_g_afdm, y=mean_consumption_bug, shape=trial))+
+  theme_classic()+
+  geom_point(data=fb_consumption_A, aes(x=fb_mg_g_afdm, y=mean_consumption_bug, shape=trial), color="#FEB72DFF", size=2)+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab(expression(paste("Fungal biomass", " (mg gAFDM"^-1*")")))+
+   ylab(expression(atop(paste("Mass-specific consumption rate"), "(mg mg"^-1*" d"^-1*")")))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)+
+  theme(axis.title.y=element_blank())
+
+fb_consumption_plot_A
+
+```
+
+Rhodo
+```{r}
+
+fb_consumption_plot_R <- 
+  ggplot(fb_consumption_R)+
+  theme_classic()+
+  geom_line(data=pred.model_consumption_fb_R, aes(x=x, y=predicted), color="#3F4788FF")+
+  geom_ribbon(data=pred.model_consumption_fb_R, aes(x = x, ymin = conf.low, ymax = conf.high, ),
+              alpha = 0.25, fill="#3F4788FF", show.legend=F)+
+  geom_point(data=fb_consumption_R, aes(x=fb_mg_g_afdm, y=mean_consumption_bug, shape=trial), color="#3F4788FF", size=2)+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab(expression(paste("Fungal biomass", " (mg gAFDM"^-1*")")))+
+   ylab(expression(atop(paste("Mass-specific consumption rate"), "(mg mg"^-1*" d"^-1*")")))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)
+fb_consumption_plot_R
+
+```
+
+
+```{r}
+
+#jpeg(filename="consumption_v_fb.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#fb_consumption_plot
+#dev.off()
+
+```
+
+Fungal biomass analysis
+
+Plot - scatter for temp vs. fb
+```{r}
+
+fb_temp_plot <- 
+  ggplot(fb_consumption, aes(x=c.trial.mean.temp.C, y=fb_mg_g_afdm, color=species, shape=trial))+
+  theme_classic()+
+  geom_point(data=fb_consumption, aes(x=c.trial.mean.temp.C, y=fb_mg_g_afdm, color=species, shape=trial))+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Mean Temperature (°C)")+
+   ylab(expression(paste("Fungal biomass (mg g"^-1*" AFDM")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)
+
+fb_temp_plot
+
+```
+
+
+```{r}
+
+fb_consumption$species <- as.factor(fb_consumption$species)
+fb_consumption_A$species <- as.factor(fb_consumption_A$species)
+fb_consumption_R$species <- as.factor(fb_consumption_R$species)
+
+model_fb_temp.lmer <- lmer(fb_mg_g_afdm ~ c.trial.mean.temp.C*species + (1|trial), data=fb_consumption)
+summary(model_fb_temp.lmer)
+
+#fb_consumption$species <- factor(fb_consumption$species, levels=rev(levels(fb_consumption$species)))#run to reverse factor levels
+
+#lmer model for temperature with trial as a fixed effect
+
+model_fb_temp.trial.lm <- lm(fb_mg_g_afdm ~ c.trial.mean.temp.C*species + trial*species, data=fb_consumption)
+summary(model_fb_temp.trial.lm)
+
+```
+
+ANOVA's to compare FB by temp treatment and trial 
+```{r}
+fb_consumption$treatment <- as.factor(fb_consumption$treatment)
+fb_consumption$trial_treatment <- paste(fb_consumption$trial, fb_consumption$treatment, sep="_")
+
+anova_fb_treatment_trial <- aov(fb_mg_g_afdm~trial_treatment*species, data=fb_consumption)
+summary(anova_fb_treatment_trial)
+
+anova_fb_trial <- aov(fb_mg_g_afdm~trial*species, data=fb_consumption)
+summary(anova_fb_trial)
+
+anova_fb_treatment <- aov(fb_mg_g_afdm~treatment*species, data=fb_consumption)
+summary(anova_fb_treatment)
+
+TukeyHSD(anova_fb_treatment_trial)
+#extremely complicated pairwise comparisons table
+
+TukeyHSD(anova_fb_trial)
+TukeyHSD(anova_fb_treatment)
+
+```
+
+Creating and exporting MS Figure S3 
+```{r}
+
+library(cowplot)
+consumption_FB_byleaf <- plot_grid(fb_consumption_plot_R, fb_consumption_plot_A, labels = c('A', 'B'))
+consumption_FB_byleaf
+
+```
+
+```{r}
+
+#jpeg(filename="consumption_FB_byleaf.jpeg", width=45, height=20, units="cm", pointsize=12, bg="white", res=600)
+#consumption_FB_byleaf
+#dev.off()
+
+```
+

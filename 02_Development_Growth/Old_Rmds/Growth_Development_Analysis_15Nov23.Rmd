@@ -1,0 +1,291 @@
+---
+title: "Growth rate analysis_5May2020_UPDATED"
+author: "Carolyn Cummins"
+date: "5/5/2020"
+output: html_document
+---
+This Rmd file contains the data carpentry and analysis for growth and development rate data from the streamside channels experiment. 
+
+*This script contains only instantaneous growth rate calculations -- IGR = ln(final)-ln(initial)/days (Huryn & Benke 1986, Hauer & Benke 1991, Reynolds & Benke 2005)
+
+```{r}
+
+library(Rmisc)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+library(tidyverse)
+photos.beg.all<-read.csv("SSC2019.photos.beg.csv")
+photos.end.all<-read.csv("SSC2019.photos.end.csv")
+
+```
+
+
+Merge beginning and ending data, process
+```{r}
+
+merged.photos.all<-merge(photos.beg.all,photos.end.all,by=c("Chamber", "Channel", "Temp.TRT", "Leaf.spp."))
+merged.photos.all<-merged.photos.all[-c(11:17, 23:29)]
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.x"] <- "Notes.beg"
+colnames(merged.photos.all)[colnames(merged.photos.all)=="Notes.y"] <- "Notes.end"
+
+```
+
+
+Add in estimated masses using DM=aL^b (Benke et al. 1999)
+```{r}
+
+merged.photos.all$beg.mass.mg<-((merged.photos.all$Beg.Length.mm^2.737)*(0.0170))
+merged.photos.all$end.mass.mg<-((merged.photos.all$End.Length.mm^2.737)*(0.0170))
+merged.photos.all$igr<-(((log(merged.photos.all$end.mass.mg))-(log(merged.photos.all$beg.mass.mg)))/(merged.photos.all$Days.in.expt))
+merged.photos.all$igr_norm <- merged.photos.all$igr/merged.photos.all$beg.mass.mg
+
+```
+
+
+Export data with beginning and ending masses for the consumption rate analysis
+```{r}
+
+bug.masses.export <- merged.photos.all %>% select(Chamber, Channel, Temp.TRT, Leaf.spp., Beg.Date, Beg.Length.mm, beg.mass.mg, End.Date, End.Length.mm, end.mass.mg, Days.in.expt, igr, igr_norm)
+#write.csv(bug.masses.export, "bug.lengths.masses.SSC2019.csv")
+
+```
+
+
+#determining outliers -- 2 sds above or below the mean!
+```{r}
+
+#standard deviation method (outliers are those observations that lie outside 2 sds from the mean)
+
+#IGR - not normalized for initial mass
+mean.igr.all<-mean(merged.photos.all$igr)
+twosd.igr.all<-2*sd(merged.photos.all$igr)
+UL.igr.all<-mean.igr.all+twosd.igr.all
+LL.igr.all<-mean.igr.all-twosd.igr.all
+
+#IGR - normalized for initial mass
+mean.igrnorm.all<-mean(merged.photos.all$igr_norm)
+twosd.igrnorm.all<-2*sd(merged.photos.all$igr_norm)
+UL.igrnorm.all<-mean.igrnorm.all+twosd.igrnorm.all
+LL.igrnorm.all<-mean.igrnorm.all-twosd.igrnorm.all
+
+```
+
+
+processing and subsetting - exclude outliers, then make separate dataframes for Rhodo and Acer
+This subsetting is based on outliers for the normalized IGR's
+```{r}
+
+merged.photos.all2norm <- merged.photos.all %>% filter(igr_norm<UL.igrnorm.all & igr_norm>LL.igrnorm.all)
+#this excluded ten outliers
+merged.photos.allR.igrnorm <- merged.photos.all2norm %>% filter(Leaf.spp.=="Rhodo")
+merged.photos.allA.igrnorm <- merged.photos.all2norm %>% filter(Leaf.spp.=="Acer")
+
+```
+
+
+Summary by channel
+```{r}
+
+summSE.bychannel.igrnorm <- summarySE(merged.photos.all2norm,measurevar="igr_norm",groupvars=c("Channel","Leaf.spp.", "Temp.TRT"),na.rm=TRUE)
+#produces NA's for Rhodo 4A because there was only one bug in that channel at the end of the experiment.
+summSE.bychannel.igrnorm$Temp.TRT<-as.numeric(summSE.bychannel.igrnorm$Temp.TRT)
+summ.SE.bychannel.R.igrnorm <- summSE.bychannel.igrnorm[which(summSE.bychannel.igrnorm$Leaf.spp.=="Rhodo"),]
+summ.SE.bychannel.A.igrnorm <- summSE.bychannel.igrnorm[which(summSE.bychannel.igrnorm$Leaf.spp.=="Acer"),]
+
+```
+
+
+Summary by treatment
+```{r}
+
+summSE.bytrt.igrnorm <- summarySE(merged.photos.all2norm, measurevar = "igr_norm", groupvars=c("Temp.TRT", "Leaf.spp."), na.rm=TRUE)
+
+```
+
+
+lmer models
+```{r}
+
+#Rhodo data only - does temperature have an effect on igr for bugs fed Rhodo?
+model.Rhodo.igrnorm.data <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.allR.igrnorm)
+summary(model.Rhodo.igrnorm.data)
+
+#Acer data only - does temperature have an effect on igr for bugs fed Acer?
+model.Acer.igrnorm.data <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.allA.igrnorm)
+summary(model.Acer.igrnorm.data)
+
+#Does the effect of temperature on igr depend on leaf species?
+model.all.int.igrnorm.bylfsp <- lmer(igr_norm ~ Temp.TRT*Leaf.spp. + (1|Channel), data=merged.photos.all2norm)
+summary(model.all.int.igrnorm.bylfsp)
+#temp and leaf spp are significant for this but not the interaction. I think this is telling me that, overall, temperature increased growth rate in the experiment regardless of leaf species. Also that Rhodo had a higher intercept for growth rate than did Acer?
+#but how can it be that, when we model each leaf species separately, there is a significant effect for Acer but not Rhodo, but then when we use all the data, we see that there is no significant interaction??
+
+#all the data - does temperature have an effect on igr overall (both leaf species)
+model.all.data.igrnorm <- lmer(igr_norm ~ Temp.TRT + (1|Channel), data=merged.photos.all2norm)
+summary(model.all.data.igrnorm)
+#yes - marginally significant (p=0.08)
+
+```
+
+Create ggpredict line and confidence interval for Acer
+```{r}
+library(ggeffects)
+pred.acer.igrnorm <- ggpredict(model.Acer.igrnorm.data, terms="Temp.TRT")
+
+```
+
+
+Graphs based on raw means by trt (mean is mean igrnorm of all bugs across all channels)
+```{r}
+options(scipen=10000)
+
+scatterplot.byspp<- ggplot(pred.acer.igrnorm)+
+  theme_classic()+
+  geom_ribbon(aes(x = x, ymin = conf.low, ymax = conf.high), alpha = 0.25)+
+  geom_line(color="#FEB72DFF", aes(x=x, y=predicted))+
+  geom_point(data=summSE.bytrt.igrnorm, position=position_dodge(width=0.5),
+             aes(x=Temp.TRT, y = igr_norm, group=Leaf.spp., color=Leaf.spp.))+
+  geom_errorbar(data=summSE.bytrt.igrnorm, position=position_dodge(width=0.5),
+                aes(x=Temp.TRT, ymin=igr_norm-se, ymax=igr_norm+se, color=Leaf.spp.), width=.2)+
+   theme(legend.position = "right", legend.title = element_blank())+
+   xlab("Temperature treatment")+
+   ylab(expression(atop(paste("Specific Growth Rate"), "(mg mg"^-1*" d"^-1*")")))+
+   scale_color_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                      labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_x_continuous(breaks=0:4, labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)+
+    scale_y_continuous(limits = c(-0.0003, 0.00105), breaks = c(0.0000, 0.0005, 0.001))
+
+scatterplot.byspp
+
+```
+
+
+```{r}
+#jpeg(filename="scatterplot.growth.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#scatterplot.2.byspp
+#dev.off()
+```
+
+
+Simple plot of beginning mass vs igr
+```{r}
+
+begmass.igr.model <- lm(igr~beg.mass.mg, data=merged.photos.all2norm)
+summary(begmass.igr.model)
+
+plot.begmass.igr <- ggplot(merged.photos.all2norm, aes(x=beg.mass.mg, y=igr)) + theme_classic() + geom_smooth(method="lm") + geom_point()
+plot.begmass.igr
+
+```
+
+#####
+
+Development rate analysis
+
+Read in the development rate data
+```{r}
+
+BWP<-read.csv("SSC2019_BWP_3Sept2023.csv")
+BWP$prop.BWP<-BWP$BWP/BWP$bugs.rem
+
+```
+
+
+How many bugs in each treatment at the end of the experiment?
+```{r}
+
+BWP_4 <- BWP %>% filter(Temp.TRT=="4")
+mean(BWP_4$bugs.rem)
+#2.25
+
+BWP_3 <- BWP %>% filter(Temp.TRT=="3")
+mean(BWP_3$bugs.rem)
+#3.375
+
+BWP_2 <- BWP %>% filter(Temp.TRT=="2")
+mean(BWP_2$bugs.rem)
+#5.5
+
+BWP_1 <- BWP %>% filter(Temp.TRT=="1")
+mean(BWP_1$bugs.rem)
+#6.875
+
+BWP_0 <- BWP %>% filter(Temp.TRT=="0")
+mean(BWP_0$bugs.rem)
+#7.375
+
+```
+
+
+```{r}
+
+summSE.BWP<-summarySE(BWP,measurevar="BWP",groupvars=c("Temp.TRT", "Leaf.spp"),na.rm=TRUE)
+summSE.BWP2<-summarySE(BWP,measurevar="prop.BWP",groupvars=c("Temp.TRT", "Leaf.spp"),na.rm=TRUE)
+
+```
+
+
+#Binomial regression analysis!
+```{r}
+
+bin.dev<-glm(cbind(BWP,no.BWP)~Temp.TRT*Leaf.spp, data=BWP, family=binomial)
+summary(bin.dev)
+
+bin.dev.noleaf <- glm(cbind(BWP,no.BWP)~Temp.TRT, data=BWP, family=binomial)
+summary(bin.dev.noleaf)
+
+
+```
+
+
+#adding line to dev graph
+```{r}
+
+dummy.data<-data.frame(Temp.TRT=seq(0,4.4,by=0.1))
+dummy.data$fit<-predict.glm(bin.dev.noleaf,newdata=dummy.data,type="response")
+
+```
+
+
+```{r}
+
+plot.BWP <- ggplot()+
+  theme_classic()+
+  geom_bar(data=summSE.BWP2, aes(x=Temp.TRT, y=prop.BWP, group=Leaf.spp, color=Leaf.spp, fill = Leaf.spp),
+           width = 0.4, position = position_dodge(width=0.5), stat="identity")+  
+  theme(legend.position="right", legend.title = element_blank())+
+  xlab("Temperature treatment")+
+  ylab("Proportion of insects with black wingpads")+
+  geom_errorbar(data=summSE.BWP2, aes(x=Temp.TRT, y= prop.BWP, ymin=prop.BWP-se, ymax=prop.BWP+se, group=Leaf.spp),
+                width=.2, position=position_dodge(width=0.5), color= "black")+
+  #geom_line(data=dummy.data,aes(x=Temp.TRT,y=fit), linetype="longdash")+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_x_continuous(breaks=0:4,labels=c("+0°C","+1°C","+2°C","+3°C","+4°C"))+
+  scale_color_manual(values=c("black","black"), guide="none")+
+  scale_fill_manual(values=c("#FEB72DFF", "#3F4788FF"),
+                     labels=c(expression(paste(italic("Acer"))),expression(paste(italic("Rhododendron")))))+
+  theme(legend.text.align=0)
+
+plot.BWP
+
+```
+
+```{r}
+
+#jpeg(filename="barplot.dev.jpeg", width=20, height=12, units="cm", pointsize=12, bg="white", res=600)
+#plot.BWP
+#dev.off()
+
+```
+
+

@@ -1,0 +1,590 @@
+---
+title: "Consumption_Rate_Calculations_SSCMS_5Jun2025"
+author: "Carolyn Cummins"
+date: "2023-08-10"
+output: html_document
+---
+
+Set WD to source file location first
+
+Read in packages:
+```{r}
+
+library(ggplot2)
+library(scales)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(ggsci)
+library(ggeffects)
+
+```
+
+
+Read in consumption rate data. CT1 = consumption trial 1, CT2 = consumption trial 2, CT3 = consumption trial 3
+```{r}
+
+CT1 <- read.csv("Consumption_data_CT1_28April21.csv", header=T)
+CT1 <- CT1 %>% mutate(date.start=ymd(date.start))
+CT1 <- CT1 %>% mutate(date.end=ymd(date.end))
+
+CT2 <- read.csv("Consumption_data_CT2_19May21.csv", header=T)
+CT2 <- CT2 %>% filter(!row_number() %in% c(161:248))
+CT2 <- CT2 %>% mutate(date.start=dmy(date.start))
+CT2 <- CT2 %>% mutate(date.end=dmy(date.end))
+
+CT3 <- read.csv("Consumption_data_CT3_19May21.csv", header=T)
+CT3 <- CT3 %>% filter(!row_number() %in% c(161:248))
+CT3 <- CT3 %>% mutate(date.start=dmy(date.start))
+CT3 <- CT3 %>% mutate(date.end=dmy(date.end))
+
+all_consumption <- read.csv("Consumption_data_all_11Dec2019.csv")
+all_consumption <- all_consumption %>% filter(!row_number() %in% c(569:2790))
+
+#will now bind CT1, CT2, and CT3. These have been determined to be identical to the all_consumption data
+all_consumption_data <- bind_rows(CT1,CT2,CT3)
+all_consumption_data <- all_consumption_data %>% dplyr::rename(trial = trial.)
+all_consumption_data <- all_consumption_data %>% dplyr::select(-c(notes))
+
+```
+
+
+Create a regression for blotted leaf mass:ash-free dry mass
+```{r}
+
+blot_AFDM_data <- read.csv("Blot_AFDM_reg_29Apr21.csv", header = TRUE)
+blot_AFDM_data$blotted_g <- (blot_AFDM_data$boat_blotted_g-blot_AFDM_data$boat_g)#get just the blotted mass (total mass - boat mass)
+blot_AFDM_data$AFDM_g <- (blot_AFDM_data$tin_DM_g - blot_AFDM_data$tin_ash_g)#get the sample AFDM
+
+#separate Rhodo vs. Acer
+blot_AFDM_data_R <- blot_AFDM_data[which(blot_AFDM_data$R.A=="R"),]
+blot_AFDM_data_A <- blot_AFDM_data[which(blot_AFDM_data$R.A=="A"),]
+blot_AFDM_data_A <- blot_AFDM_data_A[which(blot_AFDM_data_A$blotted_g>0),] #removed one outlier where the blotted weight was negative because this doesn't make sense and was likely a data entry/recording error
+
+#for this regression, force it through the origin.
+blot_AFDM_reg_R <- lm(AFDM_g~0+blotted_g, data = blot_AFDM_data_R)
+summary(blot_AFDM_reg_R)
+#R AFDM = 0.399453(blotted)
+
+blot_AFDM_reg_A <- lm(AFDM_g~0+blotted_g, data = blot_AFDM_data_A)
+summary(blot_AFDM_reg_A)
+#A AFDM = 0.209441(blotted)
+
+plot_blot_AFDM_R <-ggplot(blot_AFDM_data_R,aes(x=AFDM_g,y=blotted_g))+theme_classic()+
+  geom_point()
+
+plot_blot_AFDM_A <-ggplot(blot_AFDM_data_A,aes(x=AFDM_g,y=blotted_g))+theme_classic()+
+  geom_point()
+
+```
+
+
+*Data carpentry to get consumption rates*
+```{r}
+
+#Get blotted weights
+all_consumption_data <- all_consumption_data %>% mutate(blotted_g = boat.blot.g - boat.g)
+
+all_consumption_data <- na.omit(all_consumption_data) #deleted rows with NA for now
+
+#Get post-consumption AFDM
+all_consumption_data <- all_consumption_data %>% filter(blotted_g>0) #omit one observation where blotted weight was negative
+all_consumption_data <- all_consumption_data %>% mutate(DM_fp = fp.PCLDM.g-fp.g) #(dry mass based on foil packet + leaf - foil packet)
+all_consumption_data <- all_consumption_data %>% mutate(DM_tin = tin.dm.g - tin.mass.g) #these estimates of dry mass seem systematically lower than the FP ones.
+all_consumption_data <- all_consumption_data %>% mutate(AFDM_end = tin.dm.g-tin.ash.g) #got AFDM based on tin + dm - tin + ash (after ashing the sample)
+
+```
+
+
+Estimate beginning AFDM based on leaf species-specific blotted:AFDM regressions
+R AFDM = 0.399453(blotted)
+A AFDM = 0.209441(blotted)
+```{r}
+all_consumption_data <- all_consumption_data %>% mutate(
+  AFDM_beg = case_when(
+    species=="A" ~ 0.209441*blotted_g,
+    species=="R" ~ 0.399453*blotted_g
+  )
+)
+
+#get estimates into mg instead of g
+all_consumption_data <- all_consumption_data %>% mutate(AFDM_beg_mg = AFDM_beg*1000)
+all_consumption_data <- all_consumption_data %>% mutate(AFDM_end_mg = AFDM_end*1000)
+
+```
+
+
+In this chunk:
+1. Calculate raw consumption rates for all chambers based on AFDM at the beginning (estimate) - AFDM at the end divided by trial days
+2. Separate microbes and bugs
+3. Get average microbial consumption rate by trial, temperature, and leaf species
+4. Bind the microbe consumption averages to the bug data based on trial, temp, and leaf species
+5. Subtract microbe consumption averages from bug consumption rates
+```{r}
+#1
+all_consumption_data <- all_consumption_data %>% mutate(consumption.rate.mg.day = ((AFDM_beg_mg-AFDM_end_mg)/days))
+
+#2
+consumption_microbes <- all_consumption_data %>% filter(type=="microbes")
+consumption_bugs <- all_consumption_data %>% filter(type=="bug")
+
+#3
+microbial_consumption_averages <- consumption_microbes %>%
+  group_by(trial, treatment, species) %>%
+  dplyr::summarise(mean_microbe_consumption = mean(consumption.rate.mg.day, na.rm = T)) %>% ungroup()
+
+#4
+consumption_bugs_microbes <- left_join(consumption_bugs, microbial_consumption_averages)
+
+#5
+consumption_bugs_microbes <- consumption_bugs_microbes %>% mutate(consumption.bug.mg.day.mcorr=consumption.rate.mg.day-mean_microbe_consumption) #"mcorr" = corrected for microbial consumption
+
+```
+
+
+*Temperature data carpentry*
+Read in the temperature data averaged at the flume level, bind with the consumption_bugs_microbes dataframe
+```{r}
+
+channel_temp_weekly_averages_1 <- read.csv("all_flume_temp_expt_averages_1.csv")
+channel_temp_weekly_averages_1$week <- as.character(channel_temp_weekly_averages_1$week)
+channel_temp_weekly_averages_2 <- read.csv("all_flume_temp_expt_averages_2.csv")
+channel_temp_weekly_averages_2 <- channel_temp_weekly_averages_2 %>% filter(week %in% c("1b","3b"))
+channel_temp_weekly_averages_3 <- read.csv("all_flume_temp_expt_averages_3.csv")
+channel_temp_weekly_averages_3 <- channel_temp_weekly_averages_3 %>% filter(week %in% c("1c","3c"))
+
+channel_temp_weekly_averages <- bind_rows(channel_temp_weekly_averages_1,channel_temp_weekly_averages_2, channel_temp_weekly_averages_3)
+
+#some chambers were sampled 1 day later than others, need to match weeks exactly in order to join
+consumption_bugs_microbes <- consumption_bugs_microbes %>% mutate(
+  week = case_when(
+    date.start=='2019-03-12' & date.end=='2019-03-20' ~ '1',
+    date.start=='2019-03-12' & date.end=='2019-03-21' ~ '1b',
+    date.start=='2019-03-13' & date.end=='2019-03-21' ~ '1c',
+    date.start=='2019-03-27' & date.end=='2019-04-03' ~ '3',
+    date.start=='2019-03-28' & date.end=='2019-04-03' ~ '3b',
+    date.start=='2019-03-28' & date.end=='2019-04-04' ~ '3c',
+    date.start=='2019-04-10' & date.end=='2019-04-17' ~ '5',
+      )
+)
+
+consumption_rate_weekly_temps <- left_join(consumption_bugs_microbes, channel_temp_weekly_averages)
+consumption_rate_weekly_temps$species = as.factor(consumption_rate_weekly_temps$species)
+
+consumption_rate_weekly_temps_R <- consumption_rate_weekly_temps %>% filter(species=="R")
+consumption_rate_weekly_temps_A <- consumption_rate_weekly_temps %>% filter(species=="A")
+
+mean(consumption_rate_weekly_temps_R$blotted_g) #0.26
+mean(consumption_rate_weekly_temps_A$blotted_g) #0.17
+
+```
+
+
+Correct consumption rates by average body mass during trial
+Read in data with beginning and ending masses for each bug
+```{r}
+
+bug.beginning.masses <- read.csv("begin.lengths.masses.csv")
+colnames(bug.beginning.masses)[colnames(bug.beginning.masses)=="Temp.TRT"]<-"treatment"
+colnames(bug.beginning.masses)[colnames(bug.beginning.masses)=="Channel"]<-"channel"
+colnames(bug.beginning.masses)[colnames(bug.beginning.masses)=="Leaf.spp."]<-"species"
+colnames(bug.beginning.masses)[colnames(bug.beginning.masses)=="Chamber"]<-"chamber"
+colnames(bug.beginning.masses)[colnames(bug.beginning.masses)=="Beg.Length.mm"]<-"beg.length.mm"
+
+bug.beginning.masses <- bug.beginning.masses %>% select(treatment, channel, chamber, species, beg.length.mm, beg.mass.mg)
+
+```
+
+
+Join the beginning lengths and masses to the consumption data, calculate consumption rate per beginning mass (mg)
+```{r}
+
+bug.beginning.masses <- bug.beginning.masses %>% mutate(species = case_when(species=="Acer" ~ "A",
+                                                                            species=="Rhodo" ~ "R"))
+
+bug.beginning.masses$treatment <- as.integer(bug.beginning.masses$treatment)
+bug.beginning.masses$species <- as.factor(bug.beginning.masses$species)
+bug.beginning.masses$beg.length.mm <- as.numeric(bug.beginning.masses$beg.length.mm)
+bug.beginning.masses$beg.mass.mg <- as.numeric(bug.beginning.masses$beg.mass.mg)
+
+
+
+consumption_rate_weekly_temps_l.m <- left_join(consumption_rate_weekly_temps, bug.beginning.masses)
+
+#beginning mass-corrected bug consumption rates, including subtraction of microbial rates
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>%
+  mutate(consumption.bug.mg.day.mcorr.begmasscorr = consumption.bug.mg.day.mcorr/beg.mass.mg)
+
+#5 June 2025 - get mass-corrected bug consumption rates without subtracting microbe rates
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>%
+  mutate(consumption.bug.mg.day.begmasscorr=consumption.rate.mg.day/beg.mass.mg)
+
+```
+
+
+5 June 2025 - how many negatives in the consumption rate data that does not account for microbial consumption versus the one that does
+```{r}
+
+negative_microbe_corrected_consumption <- consumption_rate_weekly_temps_l.m %>% filter(consumption.bug.mg.day.mcorr.begmasscorr<0) #71
+
+negative_NOT_microbe_corrected_consumption <- consumption_rate_weekly_temps_l.m %>% filter(consumption.bug.mg.day.begmasscorr<0) #29
+
+#a lot less in not microbe corrected dataset
+
+```
+
+
+Correct consumption rates for the average bug mass during the trial according to our global mean IGR
+end mass = beginning mass[exp(IGR*days)]
+Figure out the days for the start and end of each trial
+```{r}
+mean_igr_all <- 0.002452633
+ssc_photos_beg <- read.csv("SSC2019.photos.beg.csv")
+begin_date <- ssc_photos_beg %>% select(Chamber, Beg.Date)
+
+colnames(begin_date)[colnames(begin_date)=="Chamber"]<-"chamber"
+colnames(begin_date)[colnames(begin_date)=="Beg.Date"]<-"expt_begin_date"
+
+begin_date <- begin_date %>% mutate(expt_begin_date=dmy(expt_begin_date))
+
+consumption_rate_weekly_temps_l.m <- left_join(consumption_rate_weekly_temps_l.m, begin_date)
+
+#get the days since the beginning of the experiment at the trial start and at the trial end for each chamber and each trial
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>% 
+  mutate(days_since_beg_trial_start=as.numeric(date.start-expt_begin_date)) %>% 
+  mutate(days_since_beg_trial_end=as.numeric(date.end-expt_begin_date))
+
+#get an estimate of each bug's mass at the beginning and end of each trial
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>% 
+  mutate(bug_modeled_mass_trial_start=beg.mass.mg*(exp(mean_igr_all*days_since_beg_trial_start))) %>% 
+  mutate(bug_modeled_mass_trial_end=beg.mass.mg*(exp(mean_igr_all*days_since_beg_trial_end)))
+
+#use each bug's mass at the start and end of each trial to calculate their approximate mass during the trial
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>% 
+  mutate(mean_modeled_bug_mass_trial=((bug_modeled_mass_trial_start + bug_modeled_mass_trial_end)/2))
+
+#correct consumption rates (corrected for microbes) for this modeled mass at the trial level
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>%
+  mutate(consumption.bug.mg.day.mcorr.modmasscorr=consumption.bug.mg.day.mcorr/mean_modeled_bug_mass_trial)
+
+
+#5 June 2025 - get the consumption rates corrected for modeled bug mass during the trial, but without subtracting microbe consumption rates
+consumption_rate_weekly_temps_l.m <- consumption_rate_weekly_temps_l.m %>%
+  mutate(consumption.bug.mg.day.modmasscorr=consumption.rate.mg.day/mean_modeled_bug_mass_trial)
+
+```
+
+
+############################################################
+
+Just curious - ash fraction for microbe samples
+```{r}
+
+consumption_microbes <- consumption_microbes %>% mutate(ash_fraction=(1-(AFDM_end/DM_tin)))
+consumption_microbes_A <- consumption_microbes %>% filter(species=="A")
+consumption_microbes_R <- consumption_microbes %>% filter(species=="R")
+
+mean_ash_fraction_A <- mean(consumption_microbes_A$ash_fraction)
+#0.18979
+
+mean_ash_fraction_R <- mean(consumption_microbes_R$ash_fraction)
+#0.09529
+
+```
+
+
+**Models for consumption rate corrected for modeled trial mass**
+Model with a leaf species interaction and random effect for trial - final model for manuscript, results presented in submitted MS
+```{r}
+
+lmer_indiv_consumption_modeled.masscorr <- lmer(consumption.bug.mg.day.mcorr.modmasscorr~mean_temp_C*species + (1|trial), data=consumption_rate_weekly_temps_l.m)
+summary(lmer_indiv_consumption_modeled.masscorr)
+#Acer: parameter estimate = -0.016, p=0.10 (not significant)
+#Rhodo: parameter estimate = 0.038, p=0.000231
+#intercept is significantly higher for Acer than Rhodo
+#slope is significantly higher for Rhodo than Acer
+
+#Run this line to see the other level of the factor as the default in the model
+consumption_rate_weekly_temps_l.m$species <- factor(consumption_rate_weekly_temps_l.m$species, levels=rev(levels(consumption_rate_weekly_temps_l.m$species)))
+
+```
+
+
+Just curious - Split corrected consumption rate data into R and A, model each leaf species separately as a function of temperature
+*when you split up the model by leaf species, there is no significant effect of temperature on Acer and there is only a marginally significant effect on Rhodo.*
+```{r}
+
+consumption_rate_weekly_temps_l.m.R <- consumption_rate_weekly_temps_l.m %>% filter(species=="R")
+consumption_rate_weekly_temps_l.m.A <- consumption_rate_weekly_temps_l.m %>% filter(species=="A")
+
+rhodo_consumption_model.mcorr.modmasscorr <- lmer(consumption.bug.mg.day.mcorr.modmasscorr ~ mean_temp_C + (1|trial), data=consumption_rate_weekly_temps_l.m.R)
+summary(rhodo_consumption_model.mcorr.modmasscorr)
+#Parameter estimate = 0.03, p=0.05
+
+#ggpredict dataframe for rhodo only
+pred.rhodo.consumption.mcorr.modmasscorr <- ggpredict(rhodo_consumption_model.mcorr.modmasscorr, terms="mean_temp_C")
+
+
+acer_consumption_model.mcorr.modmasscorr <- lmer(consumption.bug.mg.day.mcorr.modmasscorr ~ mean_temp_C + (1|trial), data=consumption_rate_weekly_temps_l.m.A)
+summary(acer_consumption_model.mcorr.modmasscorr)
+#Parameter estimate = -0.01, p=0.17
+
+#ggpredict dataframe for acer only
+pred.acer.consumption.mcorr.modmasscorr <- ggpredict(acer_consumption_model.mcorr.modmasscorr, terms="mean_temp_C")
+
+```
+
+
+Create ggpredict dataframe for both leaf spp.
+```{r}
+
+pred.rhodo.consumption.mcorr.modmasscorr$species <- "R"
+pred.acer.consumption.mcorr.modmasscorr$species <- "A"
+pred.r.a.consumption.mcorr.modmasscorr <- rbind(pred.rhodo.consumption.mcorr.modmasscorr, pred.acer.consumption.mcorr.modmasscorr)
+
+```
+
+
+Plot with all the datapoints, line and ribbon for Rhodo only - modeled mass-corrected consumption rates
+*Manuscript Figure 4*
+```{r}
+pal.consumption <- c("#3F4788FF", "#FEB72DFF")
+
+consumption_temp_plot_ggpredict.mcorr.modmasscorr <- ggplot(pred.rhodo.consumption.mcorr.modmasscorr)+
+  geom_ribbon(aes(x = x, ymin = conf.low, ymax = conf.high), alpha = 0.25, fill="#3F4788FF")+
+  geom_line(color="#3F4788FF", aes(x=x, y=predicted))+
+  geom_point(data=consumption_rate_weekly_temps_l.m, 
+             aes(x=mean_temp_C, y = consumption.bug.mg.day.mcorr.modmasscorr, color=species, shape=as.factor(trial)))+
+  theme_classic()+
+  theme(legend.title=element_blank())+
+  xlab("Mean temperature (°C)")+
+  ylab(expression(atop(paste("Mass-specific consumption rate -"),
+                       "microbe-corrected (mg mg"^-1*" d"^-1*")")))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_color_manual(values = pal.consumption, 
+                     labels=c(expression(paste(italic("Rhododendron"))), expression(paste(italic("Acer")))))+
+  theme(legend.text.align=0)+
+  scale_shape_manual(values=c(16,17,15), labels=c("Trial 1", "Trial 2", "Trial 3"))+
+  scale_x_continuous(breaks=c(9,10,11,12,13,14,15,16,17,18))
+
+consumption_temp_plot_ggpredict.mcorr.modmasscorr
+
+```
+
+Export a jpeg of Figure 4
+```{r}
+#jpeg(filename="mod.mass.spec.consumption_temp_plot.jpeg", width=22, height=12, units="cm", pointsize=12, bg="white", res=600)
+#consumption_temp_plot_ggpredict.mcorr.modmasscorr
+#dev.off()
+```
+
+
+
+##########################################################################################
+
+**5 June 2025**
+Run same models as above but without subtracting microbes:
+**Models for consumption rate corrected for modeled trial mass**
+Model with a leaf species interaction
+```{r}
+
+lmer_indiv_consumption.modmasscorr.only <- 
+  lmer(consumption.bug.mg.day.modmasscorr~mean_temp_C*species + (1|trial),
+       data=consumption_rate_weekly_temps_l.m)
+
+summary(lmer_indiv_consumption.modmasscorr.only)
+#Acer: parameter estimate = -0.016, p=0.07 (not significant)
+#Rhodo: parameter estimate = 0.008, p=0.377813
+
+#Run this line to see the other level of the factor as the default in the model
+consumption_rate_weekly_temps_l.m$species <- factor(consumption_rate_weekly_temps_l.m$species, levels=rev(levels(consumption_rate_weekly_temps_l.m$species)))
+
+```
+
+
+Split corrected consumption rate data into R and A, model each leaf species separately as a function of temperature
+```{r}
+
+rhodo_consumption_model.modmasscorr.only <- lmer(consumption.bug.mg.day.modmasscorr ~ mean_temp_C + (1|trial), data=consumption_rate_weekly_temps_l.m.R)
+summary(rhodo_consumption_model.modmasscorr.only)
+#Parameter estimate = -0.008, p = 0.43
+pred.rhodo.consumption.modmasscorr.only <- ggpredict(rhodo_consumption_model.modmasscorr.only,
+                                                     terms="mean_temp_C")
+
+
+acer_consumption_model.modmasscorr.only <- lmer(consumption.bug.mg.day.modmasscorr ~ mean_temp_C + (1|trial), data=consumption_rate_weekly_temps_l.m.A)
+summary(acer_consumption_model.modmasscorr.only)
+#Parameter estimate = -0.0012, p = 0.836
+pred.acer.consumption.modmasscorr.only <-
+  ggpredict(acer_consumption_model.modmasscorr.only, terms="mean_temp_C")
+
+```
+
+
+Create ggpredict dataframe for both leaf spp.
+```{r}
+
+pred.rhodo.consumption.modmasscorr.only$species <- "R"
+pred.acer.consumption.modmasscorr.only$species <- "A"
+pred.r.a.consumption.modmasscorr.only <- rbind(pred.rhodo.consumption.modmasscorr.only, pred.acer.consumption.modmasscorr.only)
+
+```
+
+
+Plot with all the datapoints, line and ribbon for Rhodo only - modeled mass-corrected consumption rates
+This is Figure S4 in the MS
+```{r}
+pal.consumption <- c("#3F4788FF", "#FEB72DFF")
+
+consumption_temp_plot_ggpredict.modmasscorr.only <-
+  ggplot(pred.rhodo.consumption.modmasscorr.only)+
+  geom_point(data=consumption_rate_weekly_temps_l.m, 
+             aes(x=mean_temp_C, y = consumption.bug.mg.day.modmasscorr,
+                 color=species, shape=as.factor(trial)))+
+  theme_classic()+
+  theme(legend.title=element_blank())+
+  xlab("Mean temperature (°C)")+
+  ylab(expression(atop(paste("Mass-specific consumption rate"),
+                       "(mg mg"^-1*" d"^-1*")")))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_color_manual(values = pal.consumption, 
+                     labels=c(expression(paste(italic("Rhododendron"))), expression(paste(italic("Acer")))))+
+  theme(legend.text.align=0)+
+  scale_shape_manual(values=c(16,17,15), labels=c("Trial 1", "Trial 2", "Trial 3"))+
+  scale_x_continuous(breaks=c(9,10,11,12,13,14,15,16,17,18))
+
+consumption_temp_plot_ggpredict.modmasscorr.only
+
+```
+Export Figure S4
+```{r}
+jpeg(filename="mod.mass.spec.consumption_temp_plot.nomiccorr.jpeg", width=22, height=12, units="cm", pointsize=12, bg="white", res=600)
+consumption_temp_plot_ggpredict.modmasscorr.only
+dev.off()
+```
+
+Means of "microbial" consumption and proportion of total consumption that is microbial for R and A
+```{r}
+
+mean(consumption_rate_weekly_temps_l.m.R$mean_microbe_consumption) #3.15
+mean(consumption_rate_weekly_temps_l.m.A$mean_microbe_consumption) #0.25
+
+consumption_rate_weekly_temps_l.m.A <- consumption_rate_weekly_temps_l.m.A %>%
+  mutate(microbe.proportion=mean_microbe_consumption/consumption.rate.mg.day)
+
+
+consumption_rate_weekly_temps_l.m.R <- consumption_rate_weekly_temps_l.m.R %>%
+  mutate(microbe.proportion=mean_microbe_consumption/consumption.rate.mg.day)
+
+mean(consumption_rate_weekly_temps_l.m.R$microbe.proportion) #0.818
+mean(consumption_rate_weekly_temps_l.m.A$microbe.proportion) #0.59
+
+```
+
+
+#######################################################################################
+Consumption vs. temperature in trial 1 and trial 3 to try and contextualize the FB data
+
+Trial 1
+```{r}
+
+consumption_rate_weekly_temps_l.m.CT1 <- consumption_rate_weekly_temps_l.m %>% filter(trial=="CT1")
+
+#Linear model -- use temperature treatment instead of mean temperature
+lm_indiv_consumption.masscorr.CT1 <- lm(consumption.bug.mg.day.mcorr.modmasscorr~mean_temp_C*species, data=consumption_rate_weekly_temps_l.m.CT1)
+summary(lm_indiv_consumption.masscorr.CT1)
+
+#reverse levels to examine other leaf species rel with temp
+consumption_rate_weekly_temps_l.m.CT1$species <- factor(consumption_rate_weekly_temps_l.m.CT1$species,
+                                                        levels=rev(levels(consumption_rate_weekly_temps_l.m.CT1$species)))
+#marginally significant, positive effect of temperature treatment on Rhodo consumption (parameter estimate = 0.02, p=0.07)
+#Intercept for rhodo consumption is lower, but not significant
+#nonsignificant, slightly positive effect of temperature on acer consumption (est. = 0.0103, p = 0.464)
+#model states that there is no significant difference in slopes by leaf type in trial 1
+
+```
+
+Graph for Trial 1 only
+```{r}
+
+consumption_temp_plot.CT1 <- ggplot(consumption_rate_weekly_temps_l.m.CT1, aes(x=mean_temp_C, y=consumption.bug.mg.day.mcorr.modmasscorr))+
+  geom_smooth(data = subset(consumption_rate_weekly_temps_l.m.CT1, species=="R"), method="lm", color="#3F4788FF")+ 
+  geom_point(data=consumption_rate_weekly_temps_l.m.CT1, 
+             aes(x=mean_temp_C, y = consumption.bug.mg.day.mcorr.modmasscorr, color=species))+
+  theme_classic()+
+  theme(legend.title=element_blank())+
+  xlab("Mean temperature (°C)")+
+  ylab(expression(atop(paste("Mass-specific consumption rate"), "(mg mg"^-1*" d"^-1*")")))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_color_manual(values = pal.consumption, 
+                     labels=c(expression(paste(italic("Rhododendron"))), expression(paste(italic("Acer")))))+
+  theme(legend.text.align=0)#+
+  #scale_x_continuous(breaks=c(0,1,2,3,4), labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))
+
+consumption_temp_plot.CT1
+
+
+```
+
+Trial 3
+```{r}
+
+consumption_rate_weekly_temps_l.m.CT3 <- consumption_rate_weekly_temps_l.m %>% filter(trial=="CT3")
+
+#Linear model -- use temperature treatment instead of mean temperature
+lm_indiv_consumption.masscorr.CT3 <- lm(consumption.bug.mg.day.mcorr.modmasscorr~treatment*species, data=consumption_rate_weekly_temps_l.m.CT3)
+summary(lm_indiv_consumption.masscorr.CT3)
+
+#reverse levels to examine other leaf species rel with temp
+consumption_rate_weekly_temps_l.m.CT3$species <- factor(consumption_rate_weekly_temps_l.m.CT3$species,
+                                                        levels=rev(levels(consumption_rate_weekly_temps_l.m.CT3$species)))
+#nonsignificant, positive effect of temperature treatment on Acer consumption (parameter estimate = 0.004, p=0.89)
+#Intercept for acer consumption is significantly lower
+#nonsignificant, slightly negative effect of temperature on rhodo consumption (est. = -0.01811, p=0.532)
+#model states that there is no significant difference in slopes by leaf type in trial 3
+
+
+```
+
+
+Graph for Trial 3
+```{r}
+
+consumption_temp_plot.CT3 <- ggplot(consumption_rate_weekly_temps_l.m.CT3, aes(x=mean_temp_C, y=consumption.bug.mg.day.mcorr.modmasscorr))+
+  geom_point(data=consumption_rate_weekly_temps_l.m.CT3, 
+             aes(x=mean_temp_C, y = consumption.bug.mg.day.mcorr.modmasscorr, color=species))+
+  theme_classic()+
+  theme(legend.title=element_blank())+
+  xlab("Mean temperature (°C)")+
+  ylab(expression(atop(paste("Mass-specific consumption rate"), "(mg mg"^-1*" d"^-1*")")))+
+  theme(legend.text=element_text(size=14))+
+  theme(axis.title=element_text(size=14))+
+  theme(axis.text=element_text(size=12, face="bold"))+
+  scale_color_manual(values = pal.consumption, 
+                     labels=c(expression(paste(italic("Rhododendron"))), expression(paste(italic("Acer")))))+
+  theme(legend.text.align=0)#+
+  #scale_x_continuous(breaks=c(0,1,2,3,4), labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))
+
+consumption_temp_plot.CT3
+
+
+```
+
+
+Write a .csv with consumption rates that will eventually get joined with growth and development
+```{r}
+
+consumption_rate_to.join <- consumption_rate_weekly_temps_l.m %>% select(trial, date.start, date.end, days, treatment, channel, chamber, species, mean_temp_C, AFDM_beg_mg, AFDM_end_mg, consumption.rate.mg.day, mean_microbe_consumption, consumption.bug.mg.day.mcorr, consumption.bug.mg.day.mcorr.modmasscorr, consumption.bug.mg.day.modmasscorr)
+
+write.csv(consumption_rate_to.join, "consumption_rate_to.join.csv")
+#last written and updated to synthesis folder 10 July 2025
+
+```
+
+

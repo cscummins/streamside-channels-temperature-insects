@@ -1,0 +1,299 @@
+---
+title: "Survivorship analysis - SSC"
+author: "Carolyn Cummins"
+date: "5/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+**Survival analysis for streamside channels experiment 2019**
+Set working directory to source file location first
+
+Load packages, read in survivorship data
+```{r}
+
+library(survival)
+library(ggfortify)
+library(ranger)
+library(viridis)
+library(survminer)
+library(tidyverse)
+library(patchwork)
+
+
+surv.data<-read.csv("Survivorship_data_20May2020.csv")
+surv.data<-surv.data[-c(8:15)]#delete extraneous columns
+
+```
+
+
+
+*Data carpentry*
+```{r}
+
+surv.data$trt_ID<-paste(surv.data$channel,surv.data$leaf.sp,sep="-")
+
+initial_counts<-surv.data[1:40,] #first 40 columns contain the initial number of insects in each treatment
+
+surv.data2<-surv.data[41:nrow(surv.data),] #last 40 columns contain the survivorship observations for the rest of the experiment
+
+day_sampled<-as.numeric(levels(as.factor(as.character(surv.data$days.since.start)))) #experiment days we checked the channels for survivorship
+
+IDS<-levels(as.factor(surv.data$trt_ID))
+
+```
+
+
+for-loop to create a long version of the survivorship data
+```{r}
+long_surv_data<-data.frame()
+
+for (i in 1:nrow(surv.data2)){
+
+  
+  surv.data1<-surv.data2[i,]
+  previous_sample<-surv.data[i,]
+  
+  initial<-initial_counts[initial_counts$trt_ID==surv.data1$trt_ID,]
+  
+  survivors<-surv.data1$X.surviving
+  dead<-initial$X.surviving-surv.data1$X.surviving
+  
+  surv.data3<-data.frame(Temp=surv.data1$temp.trt,Leaf.sp=surv.data1$leaf.sp,date=surv.data1$date,end_day=surv.data1$days.since.start,start_day=previous_sample$days.since.start,ID=surv.data1$trt_ID
+                 ,status=c(rep(0,survivors),rep(1,dead)))
+  
+  long_surv_data<-rbind(long_surv_data,surv.data3)
+}
+
+#"status" is the status of each bug in each treatment in the experiment on a given day. 0=alive, 1=dead. Should be 8 bugs with a "status" associated per species per channel
+
+```
+
+
+
+Make a survival object
+```{r}
+
+survival_object1 <- Surv(time=long_surv_data$start_day,
+                        time2=long_surv_data$end_day,
+                        event=long_surv_data$status,
+                        type="interval")
+
+```
+
+
+*USING SURVFIT TO VISUALIZE SURVIVAL PROBABILITY CURVES*
+
+Survival curve 1: fits all the data to one model and shows the probability of surviving as the experiment goes on - not split out by temperature or leaf type. 
+```{r}
+
+surv.curve.1 <- survfit(survival_object1~1, data=long_surv_data)
+summary(surv.curve.1)
+autoplot(surv.curve.1)
+
+```
+
+
+Survival curve 2: Leaf species
+```{r}
+
+black.bold.text<-element_text(face = "bold", color = "black", size=14)
+black.bold.text.labs<-element_text(face="bold", color="black", size=12)
+black.bold.text.leg<-element_text(face="bold", color="black", size=10)
+
+surv.curve.2.leaf <- survfit(survival_object1~Leaf.sp,data=long_surv_data)
+
+summary(surv.curve.2.leaf)
+
+survleaf.plot <- ggplot(surv.curve.2.leaf,aes(x=time,y=surv,color=strata, fill=strata))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(aes(ymin=surv.curve.2.leaf$lower, ymax=surv.curve.2.leaf$upper), show.legend=FALSE, linetype=0, alpha=0.25)+
+  xlab("Time (days)")+ylab("Survival probability")+
+  scale_color_manual(values=c("#F7E225FF", "#3F4788FF"),
+                     name="Leaf type",
+                     breaks=c("Acer", "Rhodo"),
+                     labels=c(expression(paste(italic("Acer"))), expression(paste(italic("Rhododendron")))))+
+  scale_fill_manual(values=c("#F7E225FF", "#3F4788FF"), guide=FALSE)+
+  theme(legend.title=element_blank())+
+  geom_point()+
+  theme(axis.title=black.bold.text)+
+  theme(axis.text=black.bold.text.labs)+
+  theme(axis.title.x = element_text(vjust=-0.5))+
+  theme(axis.title.y = element_text(vjust=1.5))+
+  theme(legend.text = black.bold.text.leg)+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  theme(legend.text.align=0)+
+  labs(tag="(b)")+theme(plot.tag=element_text(size=18), plot.tag.position=c(0.1, 0.23))
+
+
+survleaf.plot
+
+survleaf.plot.stack <- survleaf.plot + theme(axis.title.y = element_blank())
+
+```
+
+
+Survival curve 3: Temperature
+```{r}
+
+surv.curve.3.temp <- survfit(survival_object1~Temp,data=long_surv_data)
+summary(surv.curve.3.temp)
+
+
+survtemp.plot <- ggplot(surv.curve.3.temp,aes(x=time,y=surv,color=strata, fill=strata))+
+  geom_line()+
+  theme_classic()+
+  geom_ribbon(aes(ymin=surv.curve.3.temp$lower, ymax=surv.curve.3.temp$upper), show.legend=FALSE, linetype=0, alpha=0.25)+
+  xlab("Time (days)")+
+  ylab("Survival probability")+
+  scale_color_manual(values=c("#3E92CC", "#5C126EFF", "#F7D340FF", "#F8870EFF", "#C43C4EFF"),
+                     breaks=c("0", "1", "2", "3", "4"),
+                     labels=c("+0°C", "+1°C", "+2°C", "+3°C", "+4°C"))+
+  scale_fill_manual(values=c("#3E92CC", "#5C126EFF", "#F7D340FF", "#F8870EFF", "#C43C4EFF"), guide=FALSE)+
+  theme(legend.title=element_blank())+
+  geom_point()+
+  theme(axis.title=black.bold.text)+
+  theme(axis.text=black.bold.text.labs)+
+  theme(axis.title.x = element_text(vjust=-0.5))+
+  theme(axis.title.y = element_text(vjust=1.5))+
+  theme(legend.text = black.bold.text.leg)+
+  theme(axis.text=element_text(size=14))+
+  theme(axis.title=element_text(size=18))+
+  theme(legend.text=element_text(size=14))+
+  labs(tag="(a)")+theme(plot.tag=element_text(size=18), plot.tag.position=c(0.1, 0.2))
+
+survtemp.plot
+
+survtemp.plot.stack <- survtemp.plot + theme(axis.title.x = element_blank()) + theme(axis.title.y = element_blank())
+survtemp.plot.stack
+
+```
+
+
+*MODELS* - Statistical models to test for effects of temperature, leaf type, and their interaction
+
+Create new survival object (survival_object2 is the same as survival_object1, except we need to add a little bit to each day. This is because the survreg function cannot handle 0 values of day)
+survival_object2 is the object on which the analysis presented in the MS is based
+```{r}
+
+survival_object2 <- Surv(time=long_surv_data$start_day+0.01,
+                         time2=long_surv_data$end_day+0.01,
+                         event=long_surv_data$status,
+                         type="interval")
+
+
+```
+
+
+The following chunks use "survreg" to analyze the survival data. The models in survreg are accelerated failure time models!!
+
+Model - temp*leaf with temperature coded as an integer
+```{r}
+#cluster(long_surv_data$ID) accounts for repeated measures
+
+survival_object2.df <- as.data.frame(survival_object2) # to visualize the survival object
+
+
+model_leaf_temp_interaction <- survreg(survival_object2 ~ Temp*Leaf.sp + cluster(long_surv_data$ID), data=long_surv_data, dist="exponential")
+
+round(anova(model_leaf_temp_interaction),4)
+summary(model_leaf_temp_interaction)
+
+```
+
+
+Model that excludes leaf species, temperature coded as an integer
+```{r}
+
+model_temp_only <- survreg(survival_object2 ~ Temp + cluster(long_surv_data$ID), data=long_surv_data, dist="exponential")
+
+round(anova(model_temp_only),4)
+
+summary(model_temp_only)
+
+```
+
+
+Model with temperature coded as a factor
+```{r}
+
+long_surv_data2 <- long_surv_data
+long_surv_data2$Temp <- as.factor(long_surv_data2$Temp)
+
+model_leaf_temp_interaction2 <- survreg(survival_object2 ~ Temp*Leaf.sp + cluster(long_surv_data2$ID), data=long_surv_data2, dist="exponential")
+
+round(anova(model_leaf_temp_interaction2),4)
+summary(model_leaf_temp_interaction2)
+
+```
+
+
+#####
+
+The following chunks are the models using icenReg package - this package is specifically designed for interval censored data
+We use these analyses (specifically ic_model_1 and ic_model_3) in the paper
+We ended up selecting an accelerated failure time model with a weibull distribution since we think that time matters for survival
+Adjusted SE's using ir_clustBoot
+```{r}
+library(icenReg)
+
+ic_model_1 <- ic_par(survival_object2 ~ Temp*Leaf.sp, model="aft", dist = "weibull",  data=long_surv_data)
+summary(ic_model_1)
+
+#ic_model_2 <- ic_par(survival_object2 ~ Temp*Leaf.sp, model="aft", dist = "exponential",  data=long_surv_data)
+#summary(ic_model_2)
+
+
+##"ic_model_1 is the first model reported on in the MS - 1st half of the results paragraph that talks about the model with leaf species
+ir_clustBoot(ic_model_1, ID=long_surv_data$ID, bs_samples=1000)
+ic_model_1
+
+#ir_clustBoot(ic_model_2, ID=long_surv_data$ID, bs_samples=1000)
+#ic_model_2
+
+```
+
+
+Model without the leaf species interaction
+"ic_model3" is the model we report in the MS - 2nd half of the results paragraph that talks about the model without leaf species
+```{r}
+
+ic_model_3 <- ic_par(survival_object2~Temp, model="aft", dist="weibull", data=long_surv_data)
+ir_clustBoot(ic_model_3, ID=long_surv_data$ID, bs_samples=1000)
+ic_model_3
+
+#ic_model_4 <- ic_par(survival_object2~Temp, model="aft", dist="exponential", data=long_surv_data)
+#ir_clustBoot(ic_model_4, ID=long_surv_data$ID, bs_samples=1000)
+#ic_model_4
+
+#for each 1 degree increase in temp treatment, survival time in the experiment is reduced by approx. 9%.
+
+```
+
+
+Make a multipanel survivorship plot
+MS Figure 1
+```{r}
+
+temp.leaf.surv.plot <- survtemp.plot.stack + survleaf.plot.stack + plot_layout(widths=unit(c(10.5),c("cm")), heights=unit(c(8,8), c("cm","cm")))
+temp.leaf.surv.plot
+
+```
+
+
+Export stacked plot
+```{r}
+
+#jpeg(filename="temp.leaf.surv.plot.jpeg", width=18, height=24, units="cm", pointsize=12, bg="white", res=600)
+#temp.leaf.surv.plot
+#dev.off()
+
+```
+
+
+
